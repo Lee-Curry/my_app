@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'login_page.dart';
 import 'edit_profile_page.dart';
+import 'ai_chat_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -151,7 +152,14 @@ class HomePage extends StatelessWidget {
           Expanded(
             flex: 1,
             child: GestureDetector(
-              onTap: () => print('点击AI助手'),
+              onTap: () {
+                print('点击了AI助手');
+                // 【核心改动】
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AiChatPage()),
+                );
+              },
               child: Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(
