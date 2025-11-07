@@ -1,6 +1,8 @@
 # my_app
 
 A new Flutter project.
+Aim to improve my understanding of Flutter and coding.
+我希望通过自己的第一个app来精进我的专业能力，成为一个合格的程序员。
 
 ## Getting Started
 

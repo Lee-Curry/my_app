@@ -40,7 +40,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   File? _imageFile; // 用于存储用户从相册选择的图片文件
 
   final String _apiUrl =
-      'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+      'http://192.168.23.128:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
   void initState() {

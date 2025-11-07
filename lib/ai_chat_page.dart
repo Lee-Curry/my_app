@@ -28,7 +28,7 @@ class _AiChatPageState extends State<AiChatPage> {
   final List<ChatMessage> _messages = []; // 存储所有对话消息的列表
   bool _isLoading = false; // 是否正在等待AI回复
 
-  final String _apiUrl = 'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.128:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   // 发送消息并获取AI回复的函数
   Future<void> _sendMessage() async {
