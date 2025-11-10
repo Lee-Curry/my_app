@@ -1,4 +1,4 @@
-// === edit_profile_page.dart (黄金版 - 真实文件上传 - 完整代码) ===
+// === edit_profile_page.dart (最终版 - 完整代码) ===
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -8,15 +8,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:mime/mime.dart';
 import 'package:http_parser/http_parser.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 引入以便未来使用
 
-// 数据模型类，用于在页面间方便地传递数据
+// 数据模型类
 class UserProfileData {
+  final int? id; // 新增ID
   final String nickname;
   final String introduction;
   final String? birthDate;
   final String avatarUrl;
 
   UserProfileData({
+    this.id,
     required this.nickname,
     required this.introduction,
     this.birthDate,
@@ -26,8 +29,9 @@ class UserProfileData {
 
 class EditProfilePage extends StatefulWidget {
   final UserProfileData initialData;
+  final int userId; // 接收 userId
 
-  const EditProfilePage({super.key, required this.initialData});
+  const EditProfilePage({super.key, required this.initialData, required this.userId}); // 在构造函数中接收
 
   @override
   State<EditProfilePage> createState() => _EditProfilePageState();
@@ -37,15 +41,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late final TextEditingController _nicknameController;
   late final TextEditingController _introController;
   DateTime? _birthDate;
-  File? _imageFile; // 用于存储用户从相册选择的图片文件
+  File? _imageFile;
+  bool _isSaving = false;
 
   final String _apiUrl =
-      'http://192.168.23.128:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+      'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
   void initState() {
     super.initState();
-    // 在页面初始化时，用传递过来的数据设置输入框的初始内容
     _nicknameController =
         TextEditingController(text: widget.initialData.nickname);
     _introController =
@@ -63,10 +67,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
     super.dispose();
   }
 
-  // 从相册选择图片的函数
   Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80); // 压缩图片质量
 
     if (pickedFile != null) {
       setState(() {
@@ -75,7 +78,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  // 弹出日期选择器的函数
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -90,21 +92,21 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  // 保存个人资料的函数 (真实文件上传逻辑)
   Future<void> _saveProfile() async {
+    if(_isSaving) return;
+    setState(() { _isSaving = true; });
+
     var request = http.MultipartRequest(
       'PUT',
-      Uri.parse('$_apiUrl/api/profile'),
+      Uri.parse('$_apiUrl/api/profile/${widget.userId}'), // 在 URL 中带上 userId
     );
 
-    // 添加文本字段
     request.fields['nickname'] = _nicknameController.text;
     request.fields['introduction'] = _introController.text;
     if (_birthDate != null) {
       request.fields['birthDate'] = DateFormat('yyyy-MM-dd').format(_birthDate!);
     }
 
-    // 检查是否有新的图片文件，并将其添加到请求中
     if (_imageFile != null) {
       final mimeType = lookupMimeType(_imageFile!.path);
       request.files.add(
@@ -123,23 +125,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       if (mounted && response.statusCode == 200) {
         final updatedData = json.decode(response.body)['data'];
-        // 将后端返回的最新数据打包成 UserProfileData 对象并返回
         Navigator.pop(
             context,
             UserProfileData(
+              id: updatedData['id'],
               nickname: updatedData['nickname'] ?? '',
               introduction: updatedData['introduction'] ?? '',
-              birthDate: updatedData['birthDate'],
-              avatarUrl: updatedData['avatarUrl'] ?? '',
+              birthDate: updatedData['birth_date'],
+              avatarUrl: updatedData['avatar_url'] ?? '',
             ));
       } else if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('保存失败')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('保存失败')));
       }
     } catch (e) {
       if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('网络错误: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('网络错误: $e')));
+    } finally {
+      if(mounted) setState(() { _isSaving = false; });
     }
   }
 
@@ -150,8 +152,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         title: const Text('编辑个人信息'),
         actions: [
           TextButton(
-            onPressed: _saveProfile,
-            child: const Text('保存', style: TextStyle(fontSize: 16)),
+            onPressed: _isSaving ? null : _saveProfile,
+            child: _isSaving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2,)) : const Text('保存', style: TextStyle(fontSize: 16)),
           )
         ],
       ),

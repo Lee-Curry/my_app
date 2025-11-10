@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'auth_service.dart';
 
 // --- 欢迎页 ---
 class WelcomePage extends StatelessWidget {
@@ -93,7 +94,7 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
   final String _apiUrl =
-      'http://192.168.23.128:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+      'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
   bool _isSendingCode = false;
   bool _isLoggingIn = false;
 
@@ -164,11 +165,19 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        // 调用回调，通知 MyApp 登录成功！
+        final responseBody = json.decode(response.body);
+        final user = responseBody['user'];
+        final token = responseBody['token'];
+
+        // 1. 【核心改造】调用 AuthService 保存登录信息！
+        await AuthService.saveLoginInfo(token, user['id']);
+
+        // 2. 通知 MyApp 登录成功
         widget.onLoginSuccess();
 
-        // 移除所有登录页面，确保用户无法返回
+        // 3. 移除登录页面栈
         Navigator.of(context).popUntil((route) => route.isFirst);
+
       } else {
         final responseBody = json.decode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
