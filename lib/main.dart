@@ -7,6 +7,9 @@ import 'login_page.dart';
 import 'edit_profile_page.dart';
 import 'ai_chat_page.dart';
 import 'auth_service.dart';
+import 'photo_gallery_page.dart';
+import 'settings_page.dart';
+import 'about_us_page.dart';
 
 void main() {
   runApp(const MyApp());
@@ -181,7 +184,14 @@ class HomePage extends StatelessWidget {
           Expanded(
             flex: 2,
             child: GestureDetector(
-              onTap: () => print('点击照片墙'),
+              onTap: () {
+                print('点击照片墙, 用户ID: ${userId}');
+                // 【核心改动】
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => PhotoGalleryPage(userId: userId)),
+                );
+              },
               child: Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(
@@ -235,7 +245,7 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   UserProfileData? _profileData;
-  final String _apiUrl = 'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
   void initState() {
@@ -243,10 +253,15 @@ class _ProfilePageState extends State<ProfilePage> {
     _fetchProfile();
   }
 
+  // === 在 main.dart 的 _ProfilePageState 中，替换旧的 _fetchProfile 方法 ===
+
   Future<void> _fetchProfile() async {
     try {
       final response = await http.get(Uri.parse('$_apiUrl/api/profile/${widget.userId}'));
-      if (mounted && response.statusCode == 200) {
+
+      if (!mounted) return; // 检查页面是否还存在
+
+      if (response.statusCode == 200) {
         final data = json.decode(response.body)['data'];
         setState(() {
           _profileData = UserProfileData(
@@ -256,9 +271,24 @@ class _ProfilePageState extends State<ProfilePage> {
             avatarUrl: data['avatar_url'],
           );
         });
+      } else if (response.statusCode == 404) {
+        // 【核心修正】如果后端明确告诉我们“用户不存在”(404)
+        print('用户ID ${widget.userId} 在数据库中不存在，执行强制登出！');
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('您的账户信息异常，请重新登录。'))
+        );
+        // 直接调用从 MyApp 传过来的 onLogout 方法！
+        widget.onLogout();
+      } else {
+        // 其他网络错误
+        throw Exception('Failed to load profile');
       }
     } catch (e) {
+      print('获取个人信息失败: $e');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('加载个人信息失败')));
+
+      // 【可选优化】在加载失败时，也可以考虑强制登出
+      // widget.onLogout();
     }
   }
 
@@ -319,13 +349,26 @@ class _ProfilePageState extends State<ProfilePage> {
                   leading: const Icon(Icons.settings),
                   title: const Text('设置'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {},
+                  onTap: () {
+                    // 【核心改动】跳转到设置页面时，传入 userId
+                    Navigator.push(
+                      context,
+                      // 修改这一行
+                      MaterialPageRoute(builder: (context) => SettingsPage(userId: widget.userId)),
+                    );
+                  },
                 ),
                 ListTile(
                   leading: const Icon(Icons.info_outline),
                   title: const Text('关于我们'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {},
+                  onTap: () {
+                    // 【核心改动】跳转到关于我们页面
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const AboutUsPage()),
+                    );
+                  },
                 ),
                 ListTile(
                   leading: const Icon(Icons.logout),

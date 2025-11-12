@@ -94,7 +94,7 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
   final String _apiUrl =
-      'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+      'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
   bool _isSendingCode = false;
   bool _isLoggingIn = false;
 

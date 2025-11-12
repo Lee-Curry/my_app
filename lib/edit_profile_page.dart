@@ -45,7 +45,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   bool _isSaving = false;
 
   final String _apiUrl =
-      'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+      'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
   void initState() {
@@ -92,56 +92,83 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  // === 请用这个新函数，替换你文件中旧的 _saveProfile 函数 ===
+
   Future<void> _saveProfile() async {
-    if(_isSaving) return;
+    // 在函数开始时就打印状态，用于调试
+    print("--- [前端探针] 点击保存按钮, _imageFile 是否为空: ${_imageFile == null}");
+
+    if (_isSaving) return;
     setState(() { _isSaving = true; });
 
-    var request = http.MultipartRequest(
-      'PUT',
-      Uri.parse('$_apiUrl/api/profile/${widget.userId}'), // 在 URL 中带上 userId
-    );
-
-    request.fields['nickname'] = _nicknameController.text;
-    request.fields['introduction'] = _introController.text;
-    if (_birthDate != null) {
-      request.fields['birthDate'] = DateFormat('yyyy-MM-dd').format(_birthDate!);
-    }
-
-    if (_imageFile != null) {
-      final mimeType = lookupMimeType(_imageFile!.path);
-      request.files.add(
-        await http.MultipartFile.fromPath(
-          'avatar',
-          _imageFile!.path,
-          contentType:
-          MediaType.parse(mimeType ?? 'application/octet-stream'),
-        ),
-      );
-    }
+    final uri = Uri.parse('$_apiUrl/api/profile/${widget.userId}');
+    http.Response response; // 声明一个 response 变量来接收结果
 
     try {
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
+      // 【核心改造】根据 _imageFile 是否为空，决定发送哪种请求
+      if (_imageFile == null) {
+        // --- 情况1: 没有新图片，发送普通的 JSON 请求 ---
+        print("--- [前端探针] 正在发送 JSON PUT 请求...");
+        final headers = {'Content-Type': 'application/json'};
+        final body = json.encode({
+          'nickname': _nicknameController.text,
+          'introduction': _introController.text,
+          if (_birthDate != null) 'birthDate': DateFormat('yyyy-MM-dd').format(_birthDate!),
+        });
+        // 直接使用 http.put 发送请求
+        response = await http.put(uri, headers: headers, body: body).timeout(const Duration(seconds: 30));
 
+      } else {
+        // --- 情况2: 选择了新图片，使用你原来的 Multipart 请求逻辑 ---
+        print("--- [前端探针] 正在发送 Multipart PUT 请求...");
+        var request = http.MultipartRequest('PUT', uri);
+        request.fields['nickname'] = _nicknameController.text;
+        request.fields['introduction'] = _introController.text;
+        if (_birthDate != null) {
+          request.fields['birthDate'] = DateFormat('yyyy-MM-dd').format(_birthDate!);
+        }
+
+        final mimeType = lookupMimeType(_imageFile!.path);
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'avatar',
+            _imageFile!.path,
+            contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
+          ),
+        );
+        // 发送 Multipart 请求
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 90)); // 延长上传超时时间
+        response = await http.Response.fromStream(streamedResponse);
+      }
+
+      // --- 统一处理两种请求的响应结果 ---
       if (mounted && response.statusCode == 200) {
         final updatedData = json.decode(response.body)['data'];
+        print('--- [前端探针] 后端返回的新头像URL是: ${updatedData['avatar_url']}');
         Navigator.pop(
-            context,
-            UserProfileData(
-              id: updatedData['id'],
-              nickname: updatedData['nickname'] ?? '',
-              introduction: updatedData['introduction'] ?? '',
-              birthDate: updatedData['birth_date'],
-              avatarUrl: updatedData['avatar_url'] ?? '',
-            ));
+          context,
+          UserProfileData(
+            id: updatedData['id'],
+            nickname: updatedData['nickname'] ?? '',
+            introduction: updatedData['introduction'] ?? '',
+            birthDate: updatedData['birth_date'],
+            avatarUrl: updatedData['avatar_url'] ?? '',
+          ),
+        );
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('保存失败')));
+        print("--- [前端探针][错误] 保存失败，状态码: ${response.statusCode}, 响应体: ${response.body}");
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败: ${response.body}')));
       }
+
     } catch (e) {
-      if (mounted)
+      print("--- [前端探针][错误] 发生网络异常: $e");
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('网络错误: $e')));
+      }
     } finally {
-      if(mounted) setState(() { _isSaving = false; });
+      if (mounted) {
+        setState(() { _isSaving = false; });
+      }
     }
   }
 

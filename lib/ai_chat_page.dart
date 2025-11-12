@@ -31,7 +31,7 @@ class _AiChatPageState extends State<AiChatPage> {
   bool _isSending = false; // 状态：是否正在等待AI回复
   bool _isHistoryLoading = true; // 状态：是否正在加载历史记录
 
-  final String _apiUrl = 'http://10.61.193.166:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
   void initState() {
