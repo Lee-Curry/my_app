@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'chat_sessions_list_page.dart';
 import 'login_page.dart';
 import 'edit_profile_page.dart';
 import 'ai_chat_page.dart';
@@ -210,9 +211,12 @@ class HomePage extends StatelessWidget {
             flex: 1,
             child: GestureDetector(
               onTap: () {
+                // 【核心修改】现在跳转到 ChatSessionsListPage
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => AiChatPage(userId: userId)),
+                  MaterialPageRoute(
+                    // 传入 userId，因为列表页需要用它来获取该用户的会话
+                      builder: (context) => ChatSessionsListPage(userId: userId)),
                 );
               },
               child: Card(
@@ -255,13 +259,26 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // === 在 main.dart 的 _ProfilePageState 中，替换旧的 _fetchProfile 方法 ===
 
+  // === 在 main.dart 的 _ProfilePageState 中，用这个新版本替换旧的 _fetchProfile 方法 ===
+
   Future<void> _fetchProfile() async {
     try {
-      final response = await http.get(Uri.parse('$_apiUrl/api/profile/${widget.userId}'));
+      // 【诊断日志 1】确认函数被调用，以及 userId 是否正确
+      print("--- [前端探针] 开始获取个人信息，用户ID: ${widget.userId}");
 
-      if (!mounted) return; // 检查页面是否还存在
+      final url = Uri.parse('$_apiUrl/api/profile/${widget.userId}');
+      // 【诊断日志 2】确认请求的URL是否正确
+      print("--- [前端探针] 准备请求URL: $url");
+
+      final response = await http.get(url).timeout(const Duration(seconds: 15)); // 添加15秒超时
+
+      // 【诊断日志 3】打印服务器的响应状态
+      print("--- [前端探针] 收到服务器响应，状态码: ${response.statusCode}");
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
+        print("--- [前端探针] 响应成功，准备解析数据...");
         final data = json.decode(response.body)['data'];
         setState(() {
           _profileData = UserProfileData(
@@ -271,24 +288,18 @@ class _ProfilePageState extends State<ProfilePage> {
             avatarUrl: data['avatar_url'],
           );
         });
-      } else if (response.statusCode == 404) {
-        // 【核心修正】如果后端明确告诉我们“用户不存在”(404)
-        print('用户ID ${widget.userId} 在数据库中不存在，执行强制登出！');
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('您的账户信息异常，请重新登录。'))
-        );
-        // 直接调用从 MyApp 传过来的 onLogout 方法！
-        widget.onLogout();
+        print("--- [前端探针] 个人信息加载并刷新成功！");
       } else {
-        // 其他网络错误
-        throw Exception('Failed to load profile');
+        // 【诊断日志 4】打印后端返回的错误信息
+        print("--- [前端探针][错误] 服务器返回错误: ${response.body}");
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('加载个人信息失败，服务器响应异常。'))
+        );
       }
     } catch (e) {
-      print('获取个人信息失败: $e');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('加载个人信息失败')));
-
-      // 【可选优化】在加载失败时，也可以考虑强制登出
-      // widget.onLogout();
+      // 【诊断日志 5】捕获网络连接等异常
+      print('--- [前端探针][严重错误] 获取个人信息失败: $e');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('加载个人信息失败，请检查网络连接。')));
     }
   }
 
