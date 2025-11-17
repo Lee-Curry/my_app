@@ -8,30 +8,23 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:mime/mime.dart';
 import 'package:http_parser/http_parser.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // 引入以便未来使用
+import 'package:shared_preferences/shared_preferences.dart';
 
-// 数据模型类
-class UserProfileData {
-  final int? id; // 新增ID
-  final String nickname;
-  final String introduction;
-  final String? birthDate;
-  final String avatarUrl;
+import 'main.dart'; // 引入以便未来使用
 
-  UserProfileData({
-    this.id,
-    required this.nickname,
-    required this.introduction,
-    this.birthDate,
-    required this.avatarUrl,
-  });
-}
+// 在 edit_profile_page.dart 中
 
 class EditProfilePage extends StatefulWidget {
   final UserProfileData initialData;
-  final int userId; // 接收 userId
+  final int userId;
+  final bool hasPassword; // 1. 【新增】一个成员变量
 
-  const EditProfilePage({super.key, required this.initialData, required this.userId}); // 在构造函数中接收
+  const EditProfilePage({
+    super.key,
+    required this.initialData,
+    required this.userId,
+    required this.hasPassword, // 2. 【新增】在构造函数里接收它
+  });
 
   @override
   State<EditProfilePage> createState() => _EditProfilePageState();
@@ -141,10 +134,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
         response = await http.Response.fromStream(streamedResponse);
       }
 
-      // --- 统一处理两种请求的响应结果 ---
       if (mounted && response.statusCode == 200) {
         final updatedData = json.decode(response.body)['data'];
-        print('--- [前端探针] 后端返回的新头像URL是: ${updatedData['avatar_url']}');
         Navigator.pop(
           context,
           UserProfileData(
@@ -153,6 +144,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
             introduction: updatedData['introduction'] ?? '',
             birthDate: updatedData['birth_date'],
             avatarUrl: updatedData['avatar_url'] ?? '',
+            // 3. 【新增】把接收到的 hasPassword 状态原样返回
+            hasPassword: widget.hasPassword,
           ),
         );
       } else if (mounted) {

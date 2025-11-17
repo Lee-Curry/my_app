@@ -1,8 +1,9 @@
-// === account_security_page.dart (完整代码) ===
+// === account_security_page.dart (最终修复版 - 完整代码) ===
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'bind_phone_page.dart'; // 1. 【新增】导入新页面
 
 class AccountSecurityPage extends StatefulWidget {
   final int userId;
@@ -18,7 +19,6 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
   String? _registrationDate;
   String _errorMessage = '';
 
-  // 你的后端API地址
   final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
@@ -26,7 +26,21 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
     super.initState();
     _fetchAccountInfo();
   }
+  // 2. 【新增】跳转到绑定手机页的函数
+  Future<void> _navigateToBindPhone() async {
+    final bool? phoneHasBeenBound = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BindPhonePage(userId: widget.userId),
+      ),
+    );
+    // 如果绑定成功，返回后自动刷新本页面信息
+    if (phoneHasBeenBound == true && mounted) {
+      _fetchAccountInfo();
+    }
+  }
 
+  // --- 【核心改造】_fetchAccountInfo 函数 ---
   Future<void> _fetchAccountInfo() async {
     try {
       final response = await http.get(
@@ -42,13 +56,19 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
             _isLoading = false;
           });
         } else {
-          throw Exception('加载失败，请稍后再试');
+          // 【核心修改】不再抛出异常，而是直接从后端响应中提取错误信息并设置
+          final errorBody = json.decode(response.body);
+          setState(() {
+            _errorMessage = '加载失败: ${errorBody['message'] ?? '未知服务器错误'}';
+            _isLoading = false;
+          });
         }
       }
     } catch (e) {
+      // 捕获网络连接等异常
       if (mounted) {
         setState(() {
-          _errorMessage = e.toString();
+          _errorMessage = '网络错误: $e';
           _isLoading = false;
         });
       }
@@ -58,9 +78,7 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('账号与安全'),
-      ),
+      appBar: AppBar(title: const Text('账号与安全')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage.isNotEmpty
@@ -76,8 +94,19 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
                   title: const Text('手机号码'),
                   subtitle: Text(
                     _phoneNumber ?? '未获取到',
-                    style: const TextStyle(fontSize: 16),
+                    style: TextStyle(
+                      fontSize: 16,
+                      // 3. 【新增】如果是未绑定状态，显示不同颜色
+                      color: _phoneNumber == "未绑定手机号" ? Colors.orange[700] : null,
+                    ),
                   ),
+                  // 4. 【新增】智能显示“去绑定”或“更换”的尾部按钮
+                  trailing: _phoneNumber == "未绑定手机号"
+                      ? Icon(Icons.chevron_right, color: Colors.orange[700])
+                      : null, // 如果已绑定，就不显示箭头
+                  onTap: _phoneNumber == "未绑定手机号"
+                      ? _navigateToBindPhone // 如果未绑定，点击就跳转
+                      : null, // 如果已绑定，点击无效果 (未来可以做更换手机号)
                 ),
                 const Divider(height: 1, indent: 16),
                 ListTile(

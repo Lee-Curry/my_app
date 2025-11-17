@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'auth_service.dart';
+import 'register_page.dart';         // 1. 导入新页面
+import 'username_login_page.dart'; // 2. 导入新页面
 
-// --- 欢迎页 ---
+// --- 欢迎页 (总入口) ---
 class WelcomePage extends StatelessWidget {
   final VoidCallback onLoginSuccess;
   const WelcomePage({super.key, required this.onLoginSuccess});
@@ -21,14 +23,11 @@ class WelcomePage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Spacer(flex: 2),
-              Icon(
-                Icons.memory,
-                size: 80,
-                color: Theme.of(context).colorScheme.secondary,
-              ),
+              // 你App的图标
+              Icon(Icons.hub, size: 80, color: Theme.of(context).colorScheme.primary),
               const SizedBox(height: 24),
               const Text(
-                '欢迎回来',
+                '欢迎使用 晗伴',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
               ),
@@ -38,39 +37,59 @@ class WelcomePage extends StatelessWidget {
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
               const Spacer(flex: 3),
+
+              // 【新增】账号密码登录按钮
               ElevatedButton.icon(
                 onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (context) => PhoneLoginPage(
-                            onLoginSuccess: onLoginSuccess)),
-                  );
+                  Navigator.push(context, MaterialPageRoute(
+                      builder: (context) => UsernameLoginPage(onLoginSuccess: onLoginSuccess)
+                  ));
                 },
-                icon: const Icon(Icons.phone_iphone),
-                label: const Text('手机号登录/注册'),
+                icon: const Icon(Icons.person),
+                label: const Text('账号密码登录'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.primary,
                   foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                   textStyle: const TextStyle(fontSize: 18),
                 ),
               ),
               const SizedBox(height: 16),
+
+              // 【保留】手机号登录按钮
               ElevatedButton.icon(
-                onPressed: () => print('调用微信登录'),
-                icon: const Icon(Icons.wechat, color: Colors.white),
-                label: const Text('微信一键登录'),
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(
+                      builder: (context) => PhoneLoginPage(onLoginSuccess: onLoginSuccess)
+                  ));
+                },
+                icon: const Icon(Icons.phone_iphone),
+                label: const Text('手机验证码登录'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF09B659),
-                  foregroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.secondary,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                   textStyle: const TextStyle(fontSize: 18),
                 ),
+              ),
+              const SizedBox(height: 32),
+
+              // 【新增】注册入口
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("还没有账号？"),
+                  TextButton(
+                    onPressed: (){
+                      Navigator.push(context, MaterialPageRoute(
+                          builder: (context) => RegisterPage(onRegisterSuccess: onLoginSuccess)
+                      ));
+                    },
+                    child: const Text("立即注册"),
+                  ),
+                ],
               ),
               const Spacer(flex: 1),
             ],
