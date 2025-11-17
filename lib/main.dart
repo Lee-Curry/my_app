@@ -136,14 +136,23 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  // 1. 【新增】创建一个 ValueNotifier 作为“信箱”，初始值为0
+  final ValueNotifier<int> _totalUnreadCount = ValueNotifier<int>(0);
 
-  // 【核心修复】不再使用 late final。我们将在 build 方法中构建 _pages 列表，
-  // 或者直接在声明时构建，但这需要访问 widget，所以 build 方法是最佳位置。
-
-  // initState 保持原样，或者如果 _pages 是唯一的初始化内容，也可以暂时留空。
   @override
   void initState() {
     super.initState();
+    // 2. 【新增】监听“信箱”的变化，一旦有新值，就调用 setState 刷新UI
+    _totalUnreadCount.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    // 3. 【新增】页面销毁时，释放监听器
+    _totalUnreadCount.dispose();
+    super.dispose();
   }
 
   void _onItemTapped(int index) {
@@ -152,12 +161,19 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  // 【核心修复】不再使用 late final。我们将在 build 方法中构建 _pages 列表，
+  // 或者直接在声明时构建，但这需要访问 widget，所以 build 方法是最佳位置。
+
+
   @override
   Widget build(BuildContext context) {
-    // 【核心修复】在这里构建 _pages 列表
+    // 4. 【新增】把“信箱”通过构造函数传递给 ConversationsListPage
     final List<Widget> pages = <Widget>[
       HomePage(userId: widget.userId),
-      ConversationsListPage(currentUserId: widget.userId),
+      ConversationsListPage(
+        currentUserId: widget.userId,
+        unreadCountNotifier: _totalUnreadCount, // 传递“信箱”
+      ),
       ProfilePage(onLogout: widget.onLogout, userId: widget.userId),
     ];
 
@@ -191,10 +207,38 @@ class _MainScreenState extends State<MainScreen> {
         children: pages, // 使用我们刚刚在 build 方法里创建的列表
       ),
       bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: '首页'),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), activeIcon: Icon(Icons.chat_bubble), label: '聊天'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: '我'),
+        // 5. 【核心改造】改造 BottomNavigationBar 的 items
+        items: <BottomNavigationBarItem>[
+          const BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: '首页'),
+
+          // --- 聊天 Tab ---
+          BottomNavigationBarItem(
+            label: '聊天',
+            // 使用 Stack 来堆叠图标和红点
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.chat_bubble_outline),
+                // 如果有未读消息，就显示红点
+                if (_totalUnreadCount.value > 0)
+                  Positioned(
+                    top: -2,
+                    right: -5,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 8, minHeight: 8),
+                    ),
+                  ),
+              ],
+            ),
+            activeIcon: const Icon(Icons.chat_bubble),
+          ),
+
+          const BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: '我'),
         ],
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,

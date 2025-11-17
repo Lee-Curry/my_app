@@ -9,7 +9,13 @@ import 'users_list_page.dart';
 
 class ConversationsListPage extends StatefulWidget {
   final int currentUserId;
-  const ConversationsListPage({super.key, required this.currentUserId});
+  final ValueNotifier<int> unreadCountNotifier; // 【新增】
+  const ConversationsListPage({
+    super.key,
+    required this.currentUserId,
+    required this.unreadCountNotifier, // 【新增】
+  });
+
 
   @override
   State<ConversationsListPage> createState() => _ConversationsListPageState();
@@ -36,8 +42,19 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
       final response = await http.get(Uri.parse('$_apiUrl/api/conversations/${widget.currentUserId}'));
       if (mounted && response.statusCode == 200) {
         final data = json.decode(response.body);
+        final List<dynamic> conversations = data['data'] ?? [];
+
+        // --- 【核心改造】计算总未读数 ---
+        int totalUnread = 0;
+        for (var convo in conversations) {
+          totalUnread += (int.tryParse(convo['unreadCount']?.toString() ?? '0') ?? 0);
+        }
+
+        // --- “投递”到信箱 ---
+        widget.unreadCountNotifier.value = totalUnread;
+
         setState(() {
-          _conversations = data['data'] ?? [];
+          _conversations = conversations;
         });
       }
     } catch (e) {
