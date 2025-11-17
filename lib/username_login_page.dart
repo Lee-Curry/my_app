@@ -80,11 +80,12 @@ class _UsernameLoginPageState extends State<UsernameLoginPage> {
               TextFormField(
                 controller: _usernameController,
                 decoration: InputDecoration(
-                  labelText: '用户名',
+                  // 【核心修改】告诉用户，这里也可以输入手机号
+                  labelText: '用户名 / 手机号',
                   prefixIcon: const Icon(Icons.person_outline),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                validator: (value) => value!.isEmpty ? '请输入用户名' : null,
+                validator: (value) => value!.isEmpty ? '请输入用户名或手机号' : null,
               ),
               const SizedBox(height: 20),
               TextFormField(

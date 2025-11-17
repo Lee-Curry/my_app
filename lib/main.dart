@@ -12,18 +12,23 @@ import 'settings_page.dart';
 import 'about_us_page.dart';
 import 'chat_sessions_list_page.dart';
 import 'set_password_page.dart'; // 2. 【新增】导入新页面
-
+import 'conversations_list_page.dart'; // 1. 【新增】导入新页面
 // --- 新的数据模型 (UserProfileData) ---
+// 在 main.dart 的顶部
+
+// --- 【最终完整版】数据模型 (UserProfileData) ---
 class UserProfileData {
   final int id;
+  final String? username; // 1. 【新增】接收 username，设为可空
   final String nickname;
   final String introduction;
   final String? birthDate;
   final String avatarUrl;
-  final bool hasPassword; // 3. 【新增】判断用户是否有密码的字段
+  final bool hasPassword;
 
   UserProfileData({
     required this.id,
+    this.username, // 2. 【新增】在构造函数里添加
     required this.nickname,
     required this.introduction,
     this.birthDate,
@@ -111,6 +116,7 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
+// --- 【核心改造】App 主框架 ---
 class MainScreen extends StatefulWidget {
   final VoidCallback onThemeModeChanged;
   final VoidCallback onLogout;
@@ -126,17 +132,18 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
+// === 在 main.dart 中，用这个新版本替换旧的 _MainScreenState ===
+
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  late final List<Widget> _pages;
 
+  // 【核心修复】不再使用 late final。我们将在 build 方法中构建 _pages 列表，
+  // 或者直接在声明时构建，但这需要访问 widget，所以 build 方法是最佳位置。
+
+  // initState 保持原样，或者如果 _pages 是唯一的初始化内容，也可以暂时留空。
   @override
   void initState() {
     super.initState();
-    _pages = <Widget>[
-      HomePage(userId: widget.userId),
-      ProfilePage(onLogout: widget.onLogout, userId: widget.userId),
-    ];
   }
 
   void _onItemTapped(int index) {
@@ -147,9 +154,28 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 【核心修复】在这里构建 _pages 列表
+    final List<Widget> pages = <Widget>[
+      HomePage(userId: widget.userId),
+      ConversationsListPage(currentUserId: widget.userId),
+      ProfilePage(onLogout: widget.onLogout, userId: widget.userId),
+    ];
+
+    String getTitle() {
+      switch (_selectedIndex) {
+        case 0: return '首页';
+        case 1: return ''; // 聊天页自己有标题
+        case 2: return '我';
+        default: return '晗伴';
+      }
+    }
+
+    final showAppBar = _selectedIndex != 1;
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_selectedIndex == 0 ? '首页' : '我'),
+      appBar: showAppBar
+          ? AppBar(
+        title: Text(getTitle()),
         actions: [
           IconButton(
             icon: Icon(Theme.of(context).brightness == Brightness.dark
@@ -158,15 +184,17 @@ class _MainScreenState extends State<MainScreen> {
             onPressed: widget.onThemeModeChanged,
           ),
         ],
-      ),
+      )
+          : null,
       body: IndexedStack(
         index: _selectedIndex,
-        children: _pages,
+        children: pages, // 使用我们刚刚在 build 方法里创建的列表
       ),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: '首页'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: '我'),
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: '首页'),
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), activeIcon: Icon(Icons.chat_bubble), label: '聊天'),
+          BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: '我'),
         ],
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
@@ -265,6 +293,7 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() {
           _profileData = UserProfileData(
             id: data['id'],
+            username: data['username'], // 3. 【新增】在这里接收后端传来的 username
             nickname: data['nickname'] ?? '未设置昵称',
             introduction: data['introduction'] ?? '这家伙很酷，什么也没留下...',
             birthDate: data['birth_date'],
@@ -305,12 +334,17 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  // 6. 【新增】跳转到设置密码页的函数
   Future<void> _navigateToSetPassword() async {
+    if (_profileData == null) return;
+
     final bool? passwordHasBeenSet = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (context) => SetPasswordPage(userId: widget.userId),
+        builder: (context) => SetPasswordPage(
+          userId: widget.userId,
+          currentUsername: _profileData!.username, // 【修改】把用户名传过去
+          hasPassword: _profileData!.hasPassword, // 【修改】把密码状态传过去
+        ),
       ),
     );
 
