@@ -92,11 +92,16 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         final data = json.decode(response.body)['data'];
         final newMessages = data as List;
 
+        // 【核心改造 1】在 setState 之后，再次确保滚动
         if (jsonEncode(_messages) != jsonEncode(newMessages)) {
           setState(() {
             _messages = newMessages;
           });
+          // 我们在这里调用滚动，而不是在 setState 内部
           _scrollToBottom(isAnimated: !isInitialLoad && newMessages.isNotEmpty);
+        } else if (isInitialLoad) {
+          // 如果是首次加载，即使消息没变，也要滚一次
+          _scrollToBottom(isAnimated: false);
         }
       }
 
@@ -141,7 +146,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         if (response.statusCode == 201) {
           // 【修复3】发送成功后，立即主动获取一次最新消息列表
           // 这会覆盖掉可能存在的旧状态，并显示包含你新消息的准确列表
-          await _fetchMessages(isInitialLoad: true);
+          // 【核心改造 1】
+          // 不再调用 isInitialLoad: true，避免不必要的加载动画和状态重置
+          await _fetchMessages();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
         }
@@ -153,17 +160,22 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
   }
 
+  // === 在 private_chat_page.dart 中，用这个新函数替换旧的 _scrollToBottom 函数 ===
+
   void _scrollToBottom({bool isAnimated = true}) {
+    // 【核心改造】使用 addPostFrameCallback，确保滚动在UI渲染完成后执行
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && _scrollController.position.hasContentDimensions) {
-        if(isAnimated) {
+        final position = _scrollController.position.maxScrollExtent;
+
+        if (isAnimated) {
           _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
+            position,
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOut,
           );
         } else {
-          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+          _scrollController.jumpTo(position);
         }
       }
     });
@@ -171,6 +183,16 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 【核心改造 2】在 build 完成后，如果这是首次加载，就强制滚动到底部
+    if (_isLoading) {
+      // 正在加载时，什么都不做
+    } else {
+      // 加载完成后，（再次）调用滚动
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToBottom(isAnimated: false); // 首次进入无动画
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text(widget.otherUserNickname)),
       body: Column(

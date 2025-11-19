@@ -13,6 +13,8 @@ import 'about_us_page.dart';
 import 'chat_sessions_list_page.dart';
 import 'set_password_page.dart'; // 2. 【新增】导入新页面
 import 'conversations_list_page.dart'; // 1. 【新增】导入新页面
+import 'web_socket_service.dart';
+
 // --- 新的数据模型 (UserProfileData) ---
 // 在 main.dart 的顶部
 
@@ -64,6 +66,9 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _handleLogout() async {
+    // 【新增】断开 WebSocket 连接
+    WebSocketService().disconnect();
+
     await AuthService.clearLoginInfo();
     setState(() {
       _checkLoginFuture = AuthService.getLoginInfo();
@@ -71,6 +76,14 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _onLoginSuccess() {
+    // 【新增】登录成功后，立即建立 WebSocket 连接
+    // 我们需要 userId，所以从 AuthService 中再次获取
+    AuthService.getLoginInfo().then((loginInfo) {
+      if (loginInfo != null && loginInfo['userId'] != null) {
+        WebSocketService().connect(loginInfo['userId']);
+      }
+    });
+
     setState(() {
       _checkLoginFuture = AuthService.getLoginInfo();
     });

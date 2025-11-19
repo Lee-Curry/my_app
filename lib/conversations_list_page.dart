@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'private_chat_page.dart';
 import 'users_list_page.dart';
+import 'web_socket_service.dart'; // 1. 【新增】导入 WebSocket 服务
 
 class ConversationsListPage extends StatefulWidget {
   final int currentUserId;
@@ -32,7 +33,29 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
   void initState() {
     super.initState();
     _fetchConversations();
+
+    // 2. 【核心改造】开始监听新消息通知
+    WebSocketService().newMessageNotifier.addListener(_onNewMessageReceived);
   }
+
+  @override
+  void dispose() {
+    // 3. 【核心改造】页面销毁时，移除监听
+    WebSocketService().newMessageNotifier.removeListener(_onNewMessageReceived);
+    super.dispose();
+  }
+
+  // 4. 【新增】收到新消息后的处理函数
+  void _onNewMessageReceived() {
+    final messageEvent = WebSocketService().newMessageNotifier.value;
+    if (messageEvent != null) {
+      print("--- [ConversationsPage] 监听到新消息，准备刷新列表...");
+      // 简单粗暴但有效：直接重新获取整个列表
+      // 优化方案：可以在本地列表中找到对应的对话并更新它，避免网络请求
+      _fetchConversations();
+    }
+  }
+
 
   Future<void> _fetchConversations() async {
     if (mounted && !_isLoading) {
