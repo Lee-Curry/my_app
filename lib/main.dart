@@ -7,6 +7,7 @@ import 'login_page.dart';
 import 'edit_profile_page.dart' as edit_page; // 1. 使用别名导入，避免类名冲突
 import 'auth_service.dart';
 import 'main.dart' as edit_page;
+import 'mood_tracker_page.dart';
 import 'photo_gallery_page.dart';
 import 'settings_page.dart';
 import 'about_us_page.dart';
@@ -448,6 +449,21 @@ class _ProfilePageState extends State<ProfilePage> {
                   title: const Text('编辑资料'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: _navigateToEditProfile,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.mood, color: Colors.amber),
+                  title: const Text('每日心情'),
+                  subtitle: const Text('记录此刻感受，获取 AI 暖心鼓励'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        // 关键点：把当前用户的 ID 传过去
+                        builder: (context) => MoodTrackerPage(userId: widget.userId),
+                      ),
+                    );
+                  },
                 ),
 
                 // 7. 【新增】智能显示“设置密码”入口
