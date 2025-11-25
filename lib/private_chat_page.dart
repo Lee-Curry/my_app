@@ -1,9 +1,10 @@
-// === private_chat_page.dart (最终异步流程修复版 - 完整代码) ===
+// === private_chat_page.dart (支持点击头像跳转版 - 完整代码) ===
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'user_profile_page.dart'; // 👈 导入新页面
 
 class PrivateChatPage extends StatefulWidget {
   final int currentUserId;
@@ -34,7 +35,8 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   Timer? _timer;
   int? _conversationId;
 
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
@@ -44,7 +46,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
   @override
   void dispose() {
-    _timer?.cancel(); // 【修复1】确保定时器被正确取消
+    _timer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -54,7 +56,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     await _fetchConversationId();
     if (_conversationId != null) {
       await _fetchMessages(isInitialLoad: true);
-      // 只有在初始化成功后才启动定时器
       _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
         if (mounted) _fetchMessages();
       });
@@ -71,7 +72,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         setState(() {
           _conversationId = data['conversationId'];
         });
-        print("--- [前端探针] 获取到对话ID: $_conversationId");
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('进入对话失败: $e')));
@@ -92,15 +92,12 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         final data = json.decode(response.body)['data'];
         final newMessages = data as List;
 
-        // 【核心改造 1】在 setState 之后，再次确保滚动
         if (jsonEncode(_messages) != jsonEncode(newMessages)) {
           setState(() {
             _messages = newMessages;
           });
-          // 我们在这里调用滚动，而不是在 setState 内部
           _scrollToBottom(isAnimated: !isInitialLoad && newMessages.isNotEmpty);
         } else if (isInitialLoad) {
-          // 如果是首次加载，即使消息没变，也要滚一次
           _scrollToBottom(isAnimated: false);
         }
       }
@@ -116,7 +113,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
   }
 
-  // --- 【核心改造】_sendMessage 函数 ---
   Future<void> _sendMessage() async {
     if (_textController.text.trim().isEmpty || _isSending) return;
     if (_conversationId == null) {
@@ -127,9 +123,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     final content = _textController.text.trim();
     _textController.clear();
     setState(() { _isSending = true; });
-
-    // 【修复2】不再做乐观更新，避免状态混乱。直接发送请求。
-    // 我们将在发送成功后通过 _fetchMessages 来获取最准确的数据。
 
     try {
       final response = await http.post(
@@ -144,10 +137,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
       if (mounted) {
         if (response.statusCode == 201) {
-          // 【修复3】发送成功后，立即主动获取一次最新消息列表
-          // 这会覆盖掉可能存在的旧状态，并显示包含你新消息的准确列表
-          // 【核心改造 1】
-          // 不再调用 isInitialLoad: true，避免不必要的加载动画和状态重置
           await _fetchMessages();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
@@ -160,14 +149,10 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
   }
 
-  // === 在 private_chat_page.dart 中，用这个新函数替换旧的 _scrollToBottom 函数 ===
-
   void _scrollToBottom({bool isAnimated = true}) {
-    // 【核心改造】使用 addPostFrameCallback，确保滚动在UI渲染完成后执行
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && _scrollController.position.hasContentDimensions) {
         final position = _scrollController.position.maxScrollExtent;
-
         if (isAnimated) {
           _scrollController.animateTo(
             position,
@@ -181,20 +166,46 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     });
   }
 
+  // 封装跳转到资料页的方法
+  void _navigateToProfile(int userId, String nickname, String avatar) {
+    Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => UserProfilePage(
+          currentUserId: widget.currentUserId,
+          targetUserId: userId,
+          nickname: nickname,
+          avatarUrl: avatar,
+          introduction: "", // 聊天页暂时不传简介，进页面后再获取
+          myAvatarUrl: widget.currentUserAvatar,
+        ))
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 【核心改造 2】在 build 完成后，如果这是首次加载，就强制滚动到底部
     if (_isLoading) {
-      // 正在加载时，什么都不做
+      // 保持加载状态
     } else {
-      // 加载完成后，（再次）调用滚动
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom(isAnimated: false); // 首次进入无动画
+        _scrollToBottom(isAnimated: false);
       });
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.otherUserNickname)),
+      // 👇👇👇 核心修改 1：点击标题栏跳转资料页 👇👇👇
+      appBar: AppBar(
+        title: GestureDetector(
+          onTap: () => _navigateToProfile(widget.otherUserId, widget.otherUserNickname, widget.otherUserAvatar),
+          child: Row(
+            mainAxisSize: MainAxisSize.min, // 紧凑布局
+            children: [
+              Text(widget.otherUserNickname),
+              const SizedBox(width: 4),
+              const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+            ],
+          ),
+        ),
+      ),
       body: Column(
         children: [
           Expanded(
@@ -248,11 +259,22 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   }
 
   Widget _buildMessageItem(bool isMe, dynamic message) {
-    final children = <Widget>[
-      CircleAvatar(
+    // 确定头像对应的用户信息
+    final avatarUrl = isMe ? widget.currentUserAvatar : widget.otherUserAvatar;
+    final userId = isMe ? widget.currentUserId : widget.otherUserId;
+    final nickname = isMe ? "我" : widget.otherUserNickname;
+
+    // 👇👇👇 核心修改 2：点击头像跳转 👇👇👇
+    Widget avatarWidget = GestureDetector(
+      onTap: () => _navigateToProfile(userId, nickname, avatarUrl),
+      child: CircleAvatar(
         radius: 20,
-        backgroundImage: NetworkImage(isMe ? widget.currentUserAvatar : widget.otherUserAvatar),
+        backgroundImage: NetworkImage(avatarUrl),
       ),
+    );
+
+    final children = <Widget>[
+      avatarWidget,
       const SizedBox(width: 10),
       Flexible(
         child: Container(

@@ -1,4 +1,4 @@
-// === photo_gallery_page.dart (完整代码) ===
+// === photo_gallery_page.dart (支持朋友圈逻辑 - 完整代码) ===
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -17,6 +17,8 @@ class MediaItem {
   final String mediaType;
   final String userNickname;
   final String userAvatarUrl;
+  // 可以在列表页简单展示点赞数，如果后端没返回可以先不处理
+  final int likeCount;
 
   MediaItem({
     required this.id,
@@ -24,20 +26,23 @@ class MediaItem {
     required this.mediaType,
     required this.userNickname,
     required this.userAvatarUrl,
+    this.likeCount = 0,
   });
 
   factory MediaItem.fromJson(Map<String, dynamic> json) {
     return MediaItem(
       id: json['id'],
-      mediaUrl: json['media_url'],
-      mediaType: json['media_type'],
-      userNickname: json['nickname'],
-      userAvatarUrl: json['avatar_url'],
+      // 👇 重点：优先取 'url' (新接口)，取不到再取 'media_url' (旧接口)
+      mediaUrl: json['url'] ?? json['media_url'] ?? '',
+      mediaType: json['media_type'] ?? 'image',
+      userNickname: json['nickname'] ?? '未知用户',
+      userAvatarUrl: json['avatar_url'] ?? '',
+      likeCount: json['like_count'] ?? 0,
     );
   }
 }
 
-// 视频播放器的小组件
+// 视频播放器的小组件 (保持不变)
 class VideoPlayerWidget extends StatefulWidget {
   final String videoUrl;
   const VideoPlayerWidget({super.key, required this.videoUrl});
@@ -70,16 +75,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
           VideoPlayer(_controller),
           FloatingActionButton(
             mini: true,
+            heroTag: "btn_${widget.videoUrl}", // 防止 Hero 动画冲突
             onPressed: () {
               setState(() {
-                _controller.value.isPlaying
-                    ? _controller.pause()
-                    : _controller.play();
+                _controller.value.isPlaying ? _controller.pause() : _controller.play();
               });
             },
-            child: Icon(
-              _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-            ),
+            child: Icon(_controller.value.isPlaying ? Icons.pause : Icons.play_arrow),
           ),
         ],
       ),
@@ -96,8 +98,16 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
 // 照片墙主页面
 class PhotoGalleryPage extends StatefulWidget {
-  final int userId;
-  const PhotoGalleryPage({super.key, required this.userId});
+  final int userId;      // 目标用户 ID (看谁的)
+  final int viewerId;    // 观看者 ID (我是谁)
+  final bool isMe;       // 是否是看自己
+
+  const PhotoGalleryPage({
+    super.key,
+    required this.userId,
+    required this.viewerId,
+    this.isMe = false, // 默认为 false
+  });
 
   @override
   State<PhotoGalleryPage> createState() => _PhotoGalleryPageState();
@@ -106,7 +116,7 @@ class PhotoGalleryPage extends StatefulWidget {
 class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
   List<MediaItem> _mediaItems = [];
   bool _isLoading = true;
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换你的IP
 
   @override
   void initState() {
@@ -114,22 +124,27 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
     _fetchGallery();
   }
 
-  // === 在 photo_gallery_page.dart 中，修改 _fetchGallery 函数 ===
-
+  // 获取照片列表
   Future<void> _fetchGallery() async {
     if (!mounted) return;
     setState(() { _isLoading = true; });
 
     try {
-      // 核心改动：在API路径的末尾，加上当前用户的ID
-      final response = await http.get(Uri.parse('$_apiUrl/api/gallery/${widget.userId}'))
-          .timeout(const Duration(seconds: 15));
+      // 调用新的接口，传入 viewerId 以便后端做权限检查
+      final uri = Uri.parse('$_apiUrl/api/photos/user/${widget.userId}?currentUserId=${widget.viewerId}');
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
 
       if (mounted && response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body)['data'];
         setState(() {
           _mediaItems = data.map((item) => MediaItem.fromJson(item)).toList();
         });
+      } else if (response.statusCode == 403) {
+        // 权限被拒绝 (非好友)
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('你们还不是好友，无法查看朋友圈')));
+          setState(() => _mediaItems = []);
+        }
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载失败: $e')));
@@ -138,53 +153,38 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
     }
   }
 
-  // 【核心改造】实现真正的上传功能！
+  // 上传功能 (只允许在看自己的时候上传)
   Future<void> _uploadMedia() async {
     final picker = ImagePicker();
-    // 1. 让用户选择图片或视频
-    final XFile? pickedFile = await picker.pickMedia(); // pickMedia 可以同时选择图片和视频
+    final XFile? pickedFile = await picker.pickMedia();
 
-    if (pickedFile == null) {
-      print('用户取消了选择');
-      return;
-    }
+    if (pickedFile == null) return;
 
     final File file = File(pickedFile.path);
     final String? mimeType = lookupMimeType(file.path);
     final String mediaType = mimeType?.startsWith('image/') ?? false ? 'image' : 'video';
 
-    // 2. 准备上传请求
-    var request = http.MultipartRequest(
-      'POST', // 使用 POST 方法
-      Uri.parse('$_apiUrl/api/gallery/upload'),
-    );
+    // 假设你的上传接口还是 /api/gallery/upload，如果为了统一，可以考虑迁移到 /api/photos/upload
+    // 这里暂时保持你原有的逻辑
+    var request = http.MultipartRequest('POST', Uri.parse('$_apiUrl/api/gallery/upload'));
 
-    // 3. 添加字段
     request.fields['userId'] = widget.userId.toString();
     request.fields['mediaType'] = mediaType;
+    request.files.add(await http.MultipartFile.fromPath(
+      'media',
+      file.path,
+      contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
+    ));
 
-    // 4. 添加文件
-    request.files.add(
-      await http.MultipartFile.fromPath(
-        'media', // 与后端 multer 的 .single('media') 对应
-        file.path,
-        contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
-      ),
-    );
-
-    // 5. 发送请求并处理结果
     try {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在上传...')));
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
       if (mounted && (response.statusCode == 201 || response.statusCode == 200)) {
-        print('上传成功！');
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('上传成功！')));
-        // 上传成功后，立刻刷新列表以显示新内容
-        _fetchGallery();
+        _fetchGallery(); // 刷新
       } else if (mounted) {
-        print('上传失败: ${response.body}');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传失败: ${response.body}')));
       }
     } catch (e) {
@@ -195,14 +195,17 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('照片墙')),
+      appBar: AppBar(title: Text(widget.isMe ? '我的照片墙' : 'TA的照片墙')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _mediaItems.isEmpty
+          ? Center(child: Text('暂无动态', style: TextStyle(color: Colors.grey[600])))
           : RefreshIndicator(
-        onRefresh: _fetchGallery, // 支持下拉刷新
+        onRefresh: _fetchGallery,
         child: GridView.builder(
+          padding: const EdgeInsets.all(4),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2, // 每行显示2个
+            crossAxisCount: 3, // 朋友圈通常是3列
             crossAxisSpacing: 4,
             mainAxisSpacing: 4,
           ),
@@ -210,73 +213,40 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
           itemBuilder: (context, index) {
             final item = _mediaItems[index];
 
-            // 【核心改动】在 Card 外面包裹 GestureDetector
             return GestureDetector(
                 onTap: () {
-                  print('点击了第 $index 项, ID: ${item.id}');
-                  // 跳转到预览页面
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (context) => MediaViewerPage(
-                        mediaItems: _mediaItems, // 把整个列表传过去
-                        initialIndex: index,     // 把当前点击的索引传过去
+                        mediaItems: _mediaItems, // 列表
+                        initialIndex: index,     // 当前点击的索引
+                        viewerId: widget.viewerId, // 👈 新增：传入观看者ID
+                        apiUrl: _apiUrl,           // 👈 新增：传入API地址
                       ),
                     ),
                   );
                 },
-                child: Card( // 您原来的 Card 代码保持不变
-                  clipBehavior: Clip.antiAlias,
-                  child: Stack(
-                    fit: StackFit.expand,
-                children: [
-                  // 根据类型显示图片或视频
-                  if (item.mediaType == 'image')
-                    Image.network(item.mediaUrl, fit: BoxFit.cover)
-                  else if (item.mediaType == 'video')
-                    VideoPlayerWidget(videoUrl: item.mediaUrl),
-
-                  // 底部用户信息遮罩
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(8.0),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black.withOpacity(0.7)],
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(radius: 12, backgroundImage: NetworkImage(item.userAvatarUrl)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              item.userNickname,
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                child: Hero(
+                  tag: 'photo_${item.id}', // 添加 Hero 动画
+                  child: item.mediaType == 'image'
+                      ? Image.network(item.mediaUrl, fit: BoxFit.cover)
+                      : Container(
+                    color: Colors.black,
+                    child: const Icon(Icons.play_circle_outline, color: Colors.white, size: 40),
                   ),
-                ],
-              ),
-                ),
+                )
             );
-
           },
         ),
       ),
-      floatingActionButton: FloatingActionButton(
+      // 只有看自己的时候，才显示上传按钮
+      floatingActionButton: widget.isMe
+          ? FloatingActionButton(
         onPressed: _uploadMedia,
         child: const Icon(Icons.add_a_photo),
-      ),
+      )
+          : null,
     );
   }
 }

@@ -15,6 +15,7 @@ import 'chat_sessions_list_page.dart';
 import 'set_password_page.dart'; // 2. 【新增】导入新页面
 import 'conversations_list_page.dart'; // 1. 【新增】导入新页面
 import 'web_socket_service.dart';
+import 'contacts_page.dart'; // 👈 新增导入
 
 // --- 新的数据模型 (UserProfileData) ---
 // 在 main.dart 的顶部
@@ -179,31 +180,45 @@ class _MainScreenState extends State<MainScreen> {
   // 或者直接在声明时构建，但这需要访问 widget，所以 build 方法是最佳位置。
 
 
+  // 在 _MainScreenState 类中替换 build 方法
+
   @override
   Widget build(BuildContext context) {
-    // 4. 【新增】把“信箱”通过构造函数传递给 ConversationsListPage
+    //【新增】先判断当前是不是深色模式
+    final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    // 1. 更新页面列表：首页 -> 聊天 -> 通讯录 -> 我
     final List<Widget> pages = <Widget>[
       HomePage(userId: widget.userId),
       ConversationsListPage(
         currentUserId: widget.userId,
-        unreadCountNotifier: _totalUnreadCount, // 传递“信箱”
+        unreadCountNotifier: _totalUnreadCount,
       ),
+      // 👇👇👇 新增：通讯录页面 👇👇👇
+      ContactsPage(currentUserId: widget.userId),
+      // 👆👆👆 新增结束 👆👆👆
       ProfilePage(onLogout: widget.onLogout, userId: widget.userId),
     ];
 
     String getTitle() {
       switch (_selectedIndex) {
         case 0: return '首页';
-        case 1: return ''; // 聊天页自己有标题
-        case 2: return '我';
+        case 1: return '';
+        case 2: return '通讯录'; // 新标题
+        case 3: return '我';
         default: return '晗伴';
       }
     }
 
-    final showAppBar = _selectedIndex != 1;
+    // 只有聊天页不需要 AppBar，其他都需要 (通讯录页其实有自己的AppBar，这里可以隐藏主AppBar，或者统一管理)
+    // 简单做法：只要不是聊天页，就显示主 AppBar (通讯录如果不想要主AppBar，可以在ContactsPage里把Scaffold的appBar去掉，或者在这里控制)
+    // 推荐做法：ContactsPage 用自己的 AppBar，所以这里 index 2 也不显示主 AppBar
+    final showMainAppBar = _selectedIndex != 1 && _selectedIndex != 2;
 
     return Scaffold(
-      appBar: showAppBar
+      // 如果页面自己有AppBar，这里就设为null，防止双重标题栏
+      // 我们之前的HomePage和ProfilePage没有自带AppBar，所以这里显示
+      // 现在 ContactsPage 自带了 AppBar，所以 _selectedIndex == 2 时也不显示
+      appBar: (_selectedIndex == 0 || _selectedIndex == 3)
           ? AppBar(
         title: Text(getTitle()),
         actions: [
@@ -218,32 +233,37 @@ class _MainScreenState extends State<MainScreen> {
           : null,
       body: IndexedStack(
         index: _selectedIndex,
-        children: pages, // 使用我们刚刚在 build 方法里创建的列表
+        children: pages,
       ),
       bottomNavigationBar: BottomNavigationBar(
-        // 5. 【核心改造】改造 BottomNavigationBar 的 items
+        type: BottomNavigationBarType.fixed, // 👈 关键：超过3个Tab必须设置这个，否则会变成白色背景且图标乱跑
+        currentIndex: _selectedIndex,
+        onTap: _onItemTapped,
+        // 👇👇👇 【核心修改在这里】 👇👇👇
+        // 如果是深色模式，选中变成白色(高亮)；浅色模式则用主色调(蓝色)
+        selectedItemColor: isDarkMode ? Colors.white : Theme.of(context).primaryColor,
+
+        // 顺便确保未选中的颜色在深色模式下也能看清
+        unselectedItemColor: isDarkMode ? Colors.grey[400] : Colors.grey,
+
+        // 👆👆👆 修改结束 👆👆👆
+
         items: <BottomNavigationBarItem>[
           const BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: '首页'),
 
-          // --- 聊天 Tab ---
+          // 聊天 Tab
           BottomNavigationBarItem(
             label: '聊天',
-            // 使用 Stack 来堆叠图标和红点
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
                 const Icon(Icons.chat_bubble_outline),
-                // 如果有未读消息，就显示红点
                 if (_totalUnreadCount.value > 0)
                   Positioned(
-                    top: -2,
-                    right: -5,
+                    top: -2, right: -5,
                     child: Container(
                       padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
                       constraints: const BoxConstraints(minWidth: 8, minHeight: 8),
                     ),
                   ),
@@ -252,14 +272,20 @@ class _MainScreenState extends State<MainScreen> {
             activeIcon: const Icon(Icons.chat_bubble),
           ),
 
+          // 👇👇👇 新增：通讯录 Tab 👇👇👇
+          const BottomNavigationBarItem(
+              icon: Icon(Icons.contacts_outlined),
+              activeIcon: Icon(Icons.contacts),
+              label: '通讯录'
+          ),
+          // 👆👆👆 新增结束 👆👆👆
+
           const BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: '我'),
         ],
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
       ),
     );
   }
-}
+  }
 
 class HomePage extends StatelessWidget {
   final int userId;
@@ -277,7 +303,13 @@ class HomePage extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => PhotoGalleryPage(userId: userId)),
+                  MaterialPageRoute(
+                    builder: (context) => PhotoGalleryPage(
+                      userId: userId,        // 看的是谁（这里是看自己）
+                      viewerId: userId,      // 观看者是谁（也是自己）
+                      isMe: true,            // 标记为看自己，这样才有上传按钮
+                    ),
+                  ),
                 );
               },
               child: Card(

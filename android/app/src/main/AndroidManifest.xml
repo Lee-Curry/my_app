@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:usesCleartextTraffic="true"
-        android:label="my_app"
+        android:label="晗伴"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity

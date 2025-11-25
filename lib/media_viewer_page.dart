@@ -1,13 +1,14 @@
-// === media_viewer_page.dart (完整代码) ===
-
-import 'package:flutter/cupertino.dart';
+// === media_viewer_page.dart (头像显示 + 主题适配版 - 完整代码) ===
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'photo_gallery_page.dart'; // 导入 MediaItem 和 VideoPlayerWidget
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'photo_gallery_page.dart'; // 导入 MediaItem
 
-// === 在 media_viewer_page.dart 中，替换旧的 FullScreenVideoPlayer 和 _FullScreenVideoPlayerState ===
-
+// ==========================================
+// 1. 视频播放器组件
+// ==========================================
 class FullScreenVideoPlayer extends StatefulWidget {
   final String videoUrl;
   const FullScreenVideoPlayer({super.key, required this.videoUrl});
@@ -18,22 +19,20 @@ class FullScreenVideoPlayer extends StatefulWidget {
 
 class _FullScreenVideoPlayerState extends State<FullScreenVideoPlayer> {
   late VideoPlayerController _controller;
-  bool _showControls = true; // 是否显示控制UI
+  bool _showControls = true;
 
   @override
   void initState() {
     super.initState();
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
       ..initialize().then((_) {
-        // 视频初始化后刷新UI并自动播放
         setState(() {});
         _controller.play();
       })
-    // 【核心改动】添加一个监听器，每当播放状态改变时（播放、暂停、进度更新），就刷新UI
       ..addListener(() {
-        setState(() {}); // 这会不断触发 build 方法，从而更新进度条
+        if(mounted) setState(() {});
       });
-    _controller.setLooping(true); // 循环播放
+    _controller.setLooping(true);
   }
 
   @override
@@ -42,15 +41,17 @@ class _FullScreenVideoPlayerState extends State<FullScreenVideoPlayer> {
     super.dispose();
   }
 
-  // 切换播放/暂停的函数
   void _togglePlayPause() {
     setState(() {
-      if (_controller.value.isPlaying) {
-        _controller.pause();
-      } else {
-        _controller.play();
-      }
+      _controller.value.isPlaying ? _controller.pause() : _controller.play();
     });
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return "$minutes:$seconds";
   }
 
   @override
@@ -58,71 +59,43 @@ class _FullScreenVideoPlayerState extends State<FullScreenVideoPlayer> {
     return Center(
       child: _controller.value.isInitialized
           ? GestureDetector(
-        // 点击视频区域，切换控制UI的显示/隐藏
         onTap: () {
-          setState(() {
-            _showControls = !_showControls;
-          });
+          setState(() { _showControls = !_showControls; });
         },
         child: AspectRatio(
           aspectRatio: _controller.value.aspectRatio,
           child: Stack(
-            alignment: Alignment.bottomCenter, // 将控制条对齐到底部
+            alignment: Alignment.bottomCenter,
             children: [
-              // 视频播放器本体
               VideoPlayer(_controller),
-
-              // 【核心改动】一个动画容器，用于平滑地显示/隐藏控制UI
               AnimatedOpacity(
                 opacity: _showControls ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 300),
                 child: Container(
-                  // 底部渐变遮罩，让控制条更清晰
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withOpacity(0.7),
-                      ],
+                      begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black.withOpacity(0.7)],
                     ),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 20),
                     child: Row(
                       children: [
-                        // 播放/暂停按钮
                         IconButton(
-                          icon: Icon(
-                            _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                            color: Colors.white,
-                          ),
+                          icon: Icon(_controller.value.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white),
                           onPressed: _togglePlayPause,
                         ),
-                        // 播放时间
-                        Text(
-                          _formatDuration(_controller.value.position),
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                        // 进度条
+                        Text(_formatDuration(_controller.value.position), style: const TextStyle(color: Colors.white)),
                         Expanded(
                           child: VideoProgressIndicator(
                             _controller,
-                            allowScrubbing: true, // 允许用户拖动
+                            allowScrubbing: true,
                             padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                            colors: const VideoProgressColors(
-                              playedColor: Colors.white,
-                              bufferedColor: Colors.grey,
-                              backgroundColor: Colors.black26,
-                            ),
+                            colors: const VideoProgressColors(playedColor: Colors.white, bufferedColor: Colors.grey, backgroundColor: Colors.black26),
                           ),
                         ),
-                        // 总时长
-                        Text(
-                          _formatDuration(_controller.value.duration),
-                          style: const TextStyle(color: Colors.white),
-                        ),
+                        Text(_formatDuration(_controller.value.duration), style: const TextStyle(color: Colors.white)),
                       ],
                     ),
                   ),
@@ -135,24 +108,23 @@ class _FullScreenVideoPlayerState extends State<FullScreenVideoPlayer> {
           : const CircularProgressIndicator(color: Colors.white),
     );
   }
-
-  // 一个辅助函数，用于将 Duration 格式化为 "mm:ss" 的字符串
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes.remainder(60));
-    final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return "$minutes:$seconds";
-  }
 }
-// 媒体预览主页面
+
+// ==========================================
+// 2. 媒体预览主页面
+// ==========================================
 class MediaViewerPage extends StatefulWidget {
   final List<MediaItem> mediaItems;
   final int initialIndex;
+  final int viewerId;
+  final String apiUrl;
 
   const MediaViewerPage({
     super.key,
     required this.mediaItems,
     required this.initialIndex,
+    required this.viewerId,
+    required this.apiUrl,
   });
 
   @override
@@ -163,11 +135,28 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   late final PageController _pageController;
   late int _currentIndex;
 
+  List<dynamic> _currentLikes = [];
+  List<dynamic> _currentComments = [];
+  bool _isLiked = false;
+
+  // 动态数据
+  String _dynamicNickname = "";
+  String _dynamicAvatarUrl = ""; // 【新增】头像URL
+
+  Map<int, Map<String, dynamic>> _socialCache = {};
+
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
+
+    // 初始化时从列表数据获取
+    final initialItem = widget.mediaItems[_currentIndex];
+    _dynamicNickname = initialItem.userNickname;
+    _dynamicAvatarUrl = initialItem.userAvatarUrl; // 【新增】初始化头像
+
+    _fetchSocialDetails(_currentIndex);
   }
 
   @override
@@ -176,46 +165,365 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
     super.dispose();
   }
 
+  Future<void> _fetchSocialDetails(int index) async {
+    final photoId = widget.mediaItems[index].id;
+
+    // 切换时先重置为列表里的基础信息
+    if(mounted) {
+      setState(() {
+        _dynamicNickname = widget.mediaItems[index].userNickname;
+        _dynamicAvatarUrl = widget.mediaItems[index].userAvatarUrl;
+      });
+    }
+
+    if (_socialCache.containsKey(photoId)) {
+      final cache = _socialCache[photoId]!;
+      if(mounted) {
+        setState(() {
+          _currentLikes = cache['likes'];
+          _currentComments = cache['comments'];
+          _isLiked = cache['isLiked'];
+          if (cache['nickname'] != null) _dynamicNickname = cache['nickname'];
+          if (cache['avatar_url'] != null) _dynamicAvatarUrl = cache['avatar_url'];
+        });
+      }
+    }
+
+    try {
+      final res = await http.get(Uri.parse('${widget.apiUrl}/api/photos/detail/$photoId?viewerId=${widget.viewerId}'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body)['data'];
+        if (mounted && _currentIndex == index) {
+          setState(() {
+            _currentLikes = data['likes'];
+            _currentComments = data['comments'];
+            _isLiked = data['isLiked'];
+
+            // 从详情接口更新最新的昵称和头像
+            if (data['photo'] != null) {
+              if (data['photo']['nickname'] != null) _dynamicNickname = data['photo']['nickname'];
+              if (data['photo']['avatar_url'] != null) _dynamicAvatarUrl = data['photo']['avatar_url'];
+            }
+
+            _socialCache[photoId] = {
+              'likes': _currentLikes,
+              'comments': _currentComments,
+              'isLiked': _isLiked,
+              'nickname': _dynamicNickname,
+              'avatar_url': _dynamicAvatarUrl,
+            };
+          });
+        }
+      }
+    } catch (e) {
+      print("获取详情失败: $e");
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    final photoId = widget.mediaItems[_currentIndex].id;
+    setState(() => _isLiked = !_isLiked);
+    try {
+      final res = await http.post(
+          Uri.parse('${widget.apiUrl}/api/photos/like'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'photoId': photoId, 'userId': widget.viewerId})
+      );
+      if (res.statusCode == 200) {
+        _fetchSocialDetails(_currentIndex);
+      } else {
+        setState(() => _isLiked = !_isLiked);
+      }
+    } catch (e) {
+      setState(() => _isLiked = !_isLiked);
+    }
+  }
+
+  void _showCommentsModal() {
+    // 弹窗背景颜色也需要适配（虽然通常评论区用深色背景看起来更像抖音/小红书，但这里可以根据喜好调整）
+    // 这里保持深色背景，因为评论区独立于底色
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return _CommentsBottomSheet(
+          comments: _currentComments,
+          photoId: widget.mediaItems[_currentIndex].id,
+          viewerId: widget.viewerId,
+          apiUrl: widget.apiUrl,
+          onCommentSuccess: () {
+            _fetchSocialDetails(_currentIndex);
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 【核心改动】判断主题模式
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 定义颜色策略
+    // 深色模式：背景黑，字/图标白
+    // 浅色模式：背景白，字/图标黑
+    final Color bgColor = isDark ? Colors.black : Colors.white;
+    final Color contentColor = isDark ? Colors.white : Colors.black;
+    final Color iconColor = isDark ? Colors.white : Colors.black;
+
     return Scaffold(
-      // 使用黑色背景，更有沉浸感
-      backgroundColor: Colors.black,
+      backgroundColor: bgColor, // 动态背景色
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white, // 让返回按钮和标题变成白色
+        // AppBar 的返回箭头和标题颜色也要跟随
+        foregroundColor: contentColor,
         elevation: 0,
-        // 动态显示页码，例如 "2 / 5"
         title: Text('${_currentIndex + 1} / ${widget.mediaItems.length}'),
       ),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.mediaItems.length,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        itemBuilder: (context, index) {
-          final item = widget.mediaItems[index];
-          if (item.mediaType == 'image') {
-            // 对于图片，使用 InteractiveViewer 可以支持双指缩放和拖动
-            return InteractiveViewer(
-              child: Image.network(
-                item.mediaUrl,
-                fit: BoxFit.contain, // contain 模式保证图片完整显示
-              ),
-            );
-          } else if (item.mediaType == 'video') {
-            // 对于视频，使用我们自定义的全屏播放器
-            // 使用 Key 来确保滑动页面时，旧的播放器被销毁，新的被创建
-            return FullScreenVideoPlayer(
-              key: ValueKey(item.mediaUrl),
-              videoUrl: item.mediaUrl,
-            );
-          }
-          return const SizedBox.shrink(); // 理论上不会执行到这里
-        },
+      body: Stack(
+        children: [
+          // 1. 滑动浏览区域
+          PageView.builder(
+            controller: _pageController,
+            itemCount: widget.mediaItems.length,
+            onPageChanged: (index) {
+              setState(() => _currentIndex = index);
+              _fetchSocialDetails(index);
+            },
+            itemBuilder: (context, index) {
+              final item = widget.mediaItems[index];
+              if (item.mediaType == 'image') {
+                return InteractiveViewer(
+                  // 保证图片在任何背景下都能看清
+                  child: Image.network(item.mediaUrl, fit: BoxFit.contain),
+                );
+              } else if (item.mediaType == 'video') {
+                return FullScreenVideoPlayer(key: ValueKey(item.mediaUrl), videoUrl: item.mediaUrl);
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+
+          // 2. 底部浮层 (点赞和评论)
+          Positioned(
+            bottom: 30,
+            right: 20,
+            child: Column(
+              children: [
+                // 点赞
+                GestureDetector(
+                  onTap: _toggleLike,
+                  child: Column(
+                    children: [
+                      Icon(
+                        _isLiked ? Icons.favorite : Icons.favorite_border,
+                        // 已赞永远是红色，未赞跟随主题色
+                        color: _isLiked ? Colors.red : iconColor,
+                        size: 35,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "${_currentLikes.length}",
+                        style: TextStyle(color: contentColor, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 25),
+                // 评论
+                GestureDetector(
+                  onTap: _showCommentsModal,
+                  child: Column(
+                    children: [
+                      Icon(Icons.chat_bubble_outline, color: iconColor, size: 32),
+                      const SizedBox(height: 4),
+                      Text(
+                        "${_currentComments.length}",
+                        style: TextStyle(color: contentColor, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 3. 底部文案 (显示头像 + 昵称)
+          Positioned(
+            bottom: 30,
+            left: 20,
+            right: 80,
+            child: Row(
+              children: [
+                // 【新增】显示头像
+                CircleAvatar(
+                  radius: 20,
+                  backgroundImage: NetworkImage(_dynamicAvatarUrl),
+                  backgroundColor: Colors.grey[300], // 加载时的占位色
+                  onBackgroundImageError: (_, __) {}, // 防止加载失败崩溃
+                ),
+                const SizedBox(width: 10),
+                // 显示昵称
+                Expanded(
+                  child: Text(
+                    "@$_dynamicNickname",
+                    style: TextStyle(
+                        color: contentColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        shadows: isDark ? [] : [ // 浅色模式下加一点点阴影防止背景是白色图片看不清字
+                          const Shadow(blurRadius: 2, color: Colors.white, offset: Offset(0, 0))
+                        ]
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 3. 评论底部弹窗组件
+// ==========================================
+class _CommentsBottomSheet extends StatefulWidget {
+  final List<dynamic> comments;
+  final int photoId;
+  final int viewerId;
+  final String apiUrl;
+  final VoidCallback onCommentSuccess;
+
+  const _CommentsBottomSheet({
+    required this.comments,
+    required this.photoId,
+    required this.viewerId,
+    required this.apiUrl,
+    required this.onCommentSuccess,
+  });
+
+  @override
+  State<_CommentsBottomSheet> createState() => _CommentsBottomSheetState();
+}
+
+class _CommentsBottomSheetState extends State<_CommentsBottomSheet> {
+  final TextEditingController _textController = TextEditingController();
+
+  Future<void> _sendComment() async {
+    if (_textController.text.trim().isEmpty) return;
+    try {
+      final res = await http.post(
+          Uri.parse('${widget.apiUrl}/api/photos/comment'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'photoId': widget.photoId,
+            'userId': widget.viewerId,
+            'content': _textController.text
+          })
+      );
+      if (res.statusCode == 200) {
+        _textController.clear();
+        FocusScope.of(context).unfocus();
+        widget.onCommentSuccess();
+      }
+    } catch (e) { print(e); }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Column(
+        children: [
+          // 标题栏
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 15),
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Colors.white12)),
+            ),
+            child: Text(
+                "${widget.comments.length} 条评论",
+                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)
+            ),
+          ),
+
+          // 评论列表
+          Expanded(
+            child: widget.comments.isEmpty
+                ? const Center(child: Text("暂无评论，快来抢沙发~", style: TextStyle(color: Colors.grey)))
+                : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: widget.comments.length,
+              itemBuilder: (context, index) {
+                final c = widget.comments[index];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundImage: NetworkImage(c['avatar_url'] ?? ''),
+                        backgroundColor: Colors.grey,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(c['nickname'], style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                            const SizedBox(height: 4),
+                            Text(c['content'], style: const TextStyle(color: Colors.white, fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // 输入框
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12))),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(24)),
+                    child: TextField(
+                      controller: _textController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        hintText: "说点什么...",
+                        hintStyle: TextStyle(color: Colors.white38),
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                    onPressed: _sendComment,
+                    icon: const Icon(Icons.send, color: Colors.blue)
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

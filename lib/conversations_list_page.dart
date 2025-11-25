@@ -1,4 +1,4 @@
-// === conversations_list_page.dart (最终防崩溃版 v2 - 完整代码) ===
+// === conversations_list_page.dart (带好友申请红点版 - 完整代码) ===
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -6,17 +6,17 @@ import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'private_chat_page.dart';
 import 'users_list_page.dart';
-import 'web_socket_service.dart'; // 1. 【新增】导入 WebSocket 服务
+import 'friend_requests_page.dart';
+import 'web_socket_service.dart';
 
 class ConversationsListPage extends StatefulWidget {
   final int currentUserId;
-  final ValueNotifier<int> unreadCountNotifier; // 【新增】
+  final ValueNotifier<int> unreadCountNotifier;
   const ConversationsListPage({
     super.key,
     required this.currentUserId,
-    required this.unreadCountNotifier, // 【新增】
+    required this.unreadCountNotifier,
   });
-
 
   @override
   State<ConversationsListPage> createState() => _ConversationsListPageState();
@@ -27,38 +27,56 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
   bool _isLoading = true;
   String _myAvatarUrl = '';
 
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  // 1. 【新增】用来存好友申请的数量
+  int _friendRequestCount = 0;
+
+  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换你的IP
 
   @override
   void initState() {
     super.initState();
-    _fetchConversations();
-
-    // 2. 【核心改造】开始监听新消息通知
+    _refreshAllData(); // 统一加载数据
     WebSocketService().newMessageNotifier.addListener(_onNewMessageReceived);
   }
 
   @override
   void dispose() {
-    // 3. 【核心改造】页面销毁时，移除监听
     WebSocketService().newMessageNotifier.removeListener(_onNewMessageReceived);
     super.dispose();
   }
 
-  // 4. 【新增】收到新消息后的处理函数
   void _onNewMessageReceived() {
-    final messageEvent = WebSocketService().newMessageNotifier.value;
-    if (messageEvent != null) {
-      print("--- [ConversationsPage] 监听到新消息，准备刷新列表...");
-      // 简单粗暴但有效：直接重新获取整个列表
-      // 优化方案：可以在本地列表中找到对应的对话并更新它，避免网络请求
-      _fetchConversations();
+    if (WebSocketService().newMessageNotifier.value != null) {
+      _refreshAllData();
     }
   }
 
+  // 封装一个刷新所有数据的方法
+  Future<void> _refreshAllData() async {
+    await Future.wait([
+      _fetchConversations(),
+      _fetchFriendRequestCount(), // 2. 【新增】每次刷新也获取好友申请数
+      if (_myAvatarUrl.isEmpty) _fetchMyAvatar(),
+    ]);
+  }
+
+  // 3. 【新增】获取好友申请数量的函数
+  Future<void> _fetchFriendRequestCount() async {
+    try {
+      final response = await http.get(Uri.parse('$_apiUrl/api/friends/requests/count?userId=${widget.currentUserId}'));
+      if (mounted && response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _friendRequestCount = data['data']['count'] ?? 0;
+        });
+      }
+    } catch (e) {
+      print("获取好友申请数失败: $e");
+    }
+  }
 
   Future<void> _fetchConversations() async {
-    if (mounted && !_isLoading) {
+    if (mounted && _conversations.isEmpty) {
       setState(() { _isLoading = true; });
     }
     try {
@@ -67,13 +85,10 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
         final data = json.decode(response.body);
         final List<dynamic> conversations = data['data'] ?? [];
 
-        // --- 【核心改造】计算总未读数 ---
         int totalUnread = 0;
         for (var convo in conversations) {
           totalUnread += (int.tryParse(convo['unreadCount']?.toString() ?? '0') ?? 0);
         }
-
-        // --- “投递”到信箱 ---
         widget.unreadCountNotifier.value = totalUnread;
 
         setState(() {
@@ -81,9 +96,8 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
         });
       }
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载对话列表失败: $e')));
+      // error
     } finally {
-      if (_myAvatarUrl.isEmpty) await _fetchMyAvatar();
       if (mounted) setState(() { _isLoading = false; });
     }
   }
@@ -94,14 +108,11 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
       if(mounted && response.statusCode == 200) {
         final data = json.decode(response.body)['data'];
         if(mounted) setState(() {
-          _myAvatarUrl = data['avatar_url'] ?? 'https://images.unsplash.com/photo-1599566150163-29194dcaad36'; // 提供一个安全的默认头像
+          _myAvatarUrl = data['avatar_url'] ?? '';
         });
       }
     } catch (e) {
-      print("在对话列表页，获取自己头像失败: $e");
-      if(mounted) setState(() {
-        _myAvatarUrl = 'https://images.unsplash.com/photo-1599566150163-29194dcaad36'; // 失败时也给一个默认头像
-      });
+      // ignore
     }
   }
 
@@ -110,28 +121,25 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
     try {
       final time = DateTime.parse(isoTime.toString()).toLocal();
       final now = DateTime.now();
-
       if (now.year == time.year && now.month == time.month && now.day == time.day) {
-        return DateFormat('HH:mm').format(time); // 今天
+        return DateFormat('HH:mm').format(time);
       } else if (now.difference(time).inDays < 2 && now.day == time.day + 1) {
         return '昨天';
       } else {
-        return DateFormat('M/d').format(time); // 更早
+        return DateFormat('M/d').format(time);
       }
-    } catch(e) {
-      return '';
-    }
+    } catch(e) { return ''; }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('聊天'),
+        title: const Text('消息'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add_comment_outlined),
-            tooltip: '发起新聊天',
+            icon: const Icon(Icons.person_add_alt_1),
+            tooltip: '发现好友',
             onPressed: () async {
               await Navigator.push(
                 context,
@@ -139,120 +147,154 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
                   builder: (context) => UsersListPage(currentUserId: widget.currentUserId),
                 ),
               );
-              // 从用户列表页返回后，也刷新一下对话列表
-              _fetchConversations();
+              _refreshAllData();
             },
           )
         ],
       ),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_conversations.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.forum_outlined, size: 80, color: Colors.grey[400]),
-            const SizedBox(height: 20),
-            Text('还没有任何对话', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
-            const SizedBox(height: 10),
-            const Text('点击右上角发起聊天吧！', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
-    return RefreshIndicator(
-      onRefresh: _fetchConversations,
-      child: ListView.builder(
-        itemCount: _conversations.length,
-        itemBuilder: (context, index) {
-          final convo = _conversations[index];
-
-          if (convo == null || !(convo is Map)) return Container();
-
-          final int otherUserId = int.tryParse(convo['otherUserId']?.toString() ?? '-1') ?? -1;
-          if (otherUserId == -1) return Container();
-
-          final String otherUserNickname = convo['otherUserNickname']?.toString() ?? '未知用户';
-          final String otherUserAvatar = convo['otherUserAvatar']?.toString() ?? 'https://images.unsplash.com/photo-1599566150163-29194dcaad36';
-          final String lastMessageContent = convo['lastMessageContent']?.toString() ?? '...';
-          final int unreadCount = int.tryParse(convo['unreadCount']?.toString() ?? '0') ?? 0;
-
-          return ListTile(
-            // --- 【核心改造】leading 部分 ---
-            leading: Stack(
-              // 允许子组件超出 Stack 的边界
-              clipBehavior: Clip.none,
-              children: [
-                // 1. 底层是我们的头像
-                CircleAvatar(
-                  radius: 28,
-                  backgroundImage: NetworkImage(otherUserAvatar),
-                  onBackgroundImageError: (_, __) {},
-                ),
-
-                // 2. 顶层是未读红点，通过 Positioned 来精确定位
-                if (unreadCount > 0)
-                  Positioned(
-                    top: -4,  // 向上偏移4个像素
-                    right: -4, // 向右偏移4个像素
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20), // 确保红点是圆的
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle, // 使用圆形
-                        border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2), // 添加一个与背景色相同的描边，产生“悬浮”感
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        unreadCount.toString(),
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            title: Text(otherUserNickname, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(lastMessageContent, maxLines: 1, overflow: TextOverflow.ellipsis),
-            trailing: SizedBox(
-              width: 80,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
+      body: Column(
+        children: [
+          // === 新朋友入口 (带红点) ===
+          InkWell(
+            onTap: () async {
+              // 点击跳转到申请列表
+              await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => FriendRequestsPage(currentUserId: widget.currentUserId))
+              );
+              // 返回时刷新一下，因为可能处理了申请，红点数量要变
+              _refreshAllData();
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5))),
+              ),
+              child: Row(
                 children: [
-                  Text(
-                    _formatTimestamp(convo['lastMessageTime']),
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  // 4. 【核心修改】这里使用 Stack 来叠加红点
+                  Stack(
+                    clipBehavior: Clip.none, // 允许红点超出图标范围
+                    children: [
+                      Container(
+                        width: 50, height: 50,
+                        decoration: BoxDecoration(color: Colors.orange[400], borderRadius: BorderRadius.circular(12)),
+                        child: const Icon(Icons.person_add, color: Colors.white, size: 28),
+                      ),
+
+                      // 如果有申请，显示红点
+                      if (_friendRequestCount > 0)
+                        Positioned(
+                          top: -5,
+                          right: -5,
+                          child: Container(
+                            padding: const EdgeInsets.all(5),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2), // 白色描边，增强立体感
+                            ),
+                            constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+                            alignment: Alignment.center,
+                            child: Text(
+                              _friendRequestCount > 99 ? '99+' : _friendRequestCount.toString(),
+                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  // 我们把红点从这里移走了，所以这里留一个占位符，保持时间文本的垂直居中
-                  const SizedBox(height: 20),
+
+                  const SizedBox(width: 15),
+                  const Text("新朋友", style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  const Icon(Icons.chevron_right, color: Colors.grey),
                 ],
               ),
             ),
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => PrivateChatPage(
-                    currentUserId: widget.currentUserId,
-                    otherUserId: otherUserId,
-                    otherUserNickname: otherUserNickname,
-                    otherUserAvatar: otherUserAvatar,
-                    currentUserAvatar: _myAvatarUrl,
-                  ),
-                ),
-              );
-              _fetchConversations();
-            },
-          );
-        },
+          ),
+
+          // === 对话列表 (保持不变) ===
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+              onRefresh: _refreshAllData, // 下拉刷新时，也会刷新好友红点
+              child: _conversations.isEmpty
+                  ? Center(child: Text('暂无聊天消息', style: TextStyle(color: Colors.grey[600])))
+                  : ListView.builder(
+                itemCount: _conversations.length,
+                itemBuilder: (context, index) {
+                  final convo = _conversations[index];
+                  if (convo == null || !(convo is Map)) return Container();
+
+                  final int otherUserId = int.tryParse(convo['otherUserId']?.toString() ?? '-1') ?? -1;
+                  if (otherUserId == -1) return Container();
+
+                  final String otherUserNickname = convo['otherUserNickname']?.toString() ?? '未知用户';
+                  final String otherUserAvatar = convo['otherUserAvatar']?.toString() ?? '';
+                  final String lastMessageContent = convo['lastMessageContent']?.toString() ?? '...';
+                  final int unreadCount = int.tryParse(convo['unreadCount']?.toString() ?? '0') ?? 0;
+
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        CircleAvatar(
+                          radius: 25,
+                          backgroundImage: NetworkImage(otherUserAvatar),
+                          onBackgroundImageError: (_, __) {},
+                        ),
+                        if (unreadCount > 0)
+                          Positioned(
+                            top: -2, right: -2,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                              alignment: Alignment.center,
+                              child: Text(
+                                unreadCount > 99 ? '99+' : unreadCount.toString(),
+                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    title: Text(otherUserNickname, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(lastMessageContent, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey[600])),
+                    ),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(_formatTimestamp(convo['lastMessageTime']), style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                      ],
+                    ),
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => PrivateChatPage(
+                            currentUserId: widget.currentUserId,
+                            otherUserId: otherUserId,
+                            otherUserNickname: otherUserNickname,
+                            otherUserAvatar: otherUserAvatar,
+                            currentUserAvatar: _myAvatarUrl,
+                          ),
+                        ),
+                      );
+                      _refreshAllData();
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
