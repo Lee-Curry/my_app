@@ -1,10 +1,18 @@
-// === private_chat_page.dart (支持点击头像跳转版 - 完整代码) ===
+// === private_chat_page.dart (视频封面修复版 - 完整代码) ===
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
-import 'user_profile_page.dart'; // 👈 导入新页面
+import 'package:image_picker/image_picker.dart';
+import 'package:http_parser/http_parser.dart';
+import 'package:mime/mime.dart';
+import 'package:video_player/video_player.dart'; // 👈 必须导入这个
+import 'user_profile_page.dart';
+import 'photo_gallery_page.dart';
+import 'media_viewer_page.dart';
+import 'web_socket_service.dart';
 
 class PrivateChatPage extends StatefulWidget {
   final int currentUserId;
@@ -32,24 +40,33 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   List<dynamic> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
+  bool _showSendButton = false;
+
   Timer? _timer;
   int? _conversationId;
-
-  // ！！！！请务必替换为您自己的IP地址！！！！
   final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
     _initializeChat();
+    _textController.addListener(() {
+      setState(() { _showSendButton = _textController.text.trim().isNotEmpty; });
+    });
+    WebSocketService().newMessageNotifier.addListener(_onWsEvent);
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    WebSocketService().newMessageNotifier.removeListener(_onWsEvent);
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onWsEvent() {
+    if (mounted) _fetchMessages();
   }
 
   Future<void> _initializeChat() async {
@@ -69,13 +86,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       final response = await http.get(Uri.parse('$_apiUrl/api/conversation/find-or-create/${widget.currentUserId}/${widget.otherUserId}'));
       if(mounted && response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          _conversationId = data['conversationId'];
-        });
+        setState(() { _conversationId = data['conversationId']; });
       }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('进入对话失败: $e')));
-    }
+    } catch (e) {}
   }
 
   Future<void> _fetchMessages({bool isInitialLoad = false}) async {
@@ -83,46 +96,29 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       if(isInitialLoad && mounted) setState(() { _isLoading = false; });
       return;
     }
-    if (isInitialLoad && mounted) setState(() { _isLoading = true; });
-
     try {
       final response = await http.get(Uri.parse('$_apiUrl/api/messages/$_conversationId'));
-
       if (mounted && response.statusCode == 200) {
         final data = json.decode(response.body)['data'];
-        final newMessages = data as List;
-
+        final List newMessages = (data as List).reversed.toList();
         if (jsonEncode(_messages) != jsonEncode(newMessages)) {
-          setState(() {
-            _messages = newMessages;
-          });
-          _scrollToBottom(isAnimated: !isInitialLoad && newMessages.isNotEmpty);
-        } else if (isInitialLoad) {
-          _scrollToBottom(isAnimated: false);
+          setState(() { _messages = newMessages; });
         }
       }
-
       if (isInitialLoad) {
         await http.put(Uri.parse('$_apiUrl/api/messages/mark-read/$_conversationId/${widget.currentUserId}'));
+        if (mounted) setState(() { _isLoading = false; });
       }
     } catch (e) {
-      if (!isInitialLoad) return;
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载消息失败: $e')));
-    } finally {
       if (isInitialLoad && mounted) setState(() { _isLoading = false; });
     }
   }
 
   Future<void> _sendMessage() async {
-    if (_textController.text.trim().isEmpty || _isSending) return;
-    if (_conversationId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在建立连接，请稍后重试...')));
-      return;
-    }
-
+    if (!_showSendButton || _isSending) return;
     final content = _textController.text.trim();
     _textController.clear();
-    setState(() { _isSending = true; });
+    setState(() { _isSending = true; _showSendButton = false; });
 
     try {
       final response = await http.post(
@@ -133,71 +129,248 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           'receiverId': widget.otherUserId,
           'content': content,
         }),
-      ).timeout(const Duration(seconds: 20));
-
-      if (mounted) {
-        if (response.statusCode == 201) {
-          await _fetchMessages();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
-        }
+      );
+      if (mounted && response.statusCode == 201) {
+        await _fetchMessages();
+        _scrollToBottom();
       }
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('网络错误，发送失败: $e')));
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
     } finally {
       if(mounted) setState(() { _isSending = false; });
     }
   }
 
-  void _scrollToBottom({bool isAnimated = true}) {
+  Future<bool> _confirmSendMultiMedia(List<XFile> files, {bool isVideo = false}) async {
+    return await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("发送 ${files.length} 个${isVideo ? '视频' : '图片'}？"),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 120,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: files.length,
+            itemBuilder: (context, index) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: isVideo
+                      ? Container(width: 100, color: Colors.black, child: const Icon(Icons.videocam, color: Colors.white))
+                      : Image.file(File(files[index].path), width: 100, height: 100, fit: BoxFit.cover),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("取消", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("发送")),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<void> _pickAndSendMedia({required bool isVideo, required bool isCamera}) async {
+    final picker = ImagePicker();
+    List<XFile> selectedFiles = [];
+
+    if (isCamera) {
+      final XFile? file = isVideo
+          ? await picker.pickVideo(source: ImageSource.camera)
+          : await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+      if (file != null) selectedFiles.add(file);
+    } else {
+      if (isVideo) {
+        final XFile? file = await picker.pickVideo(source: ImageSource.gallery);
+        if (file != null) selectedFiles.add(file);
+      } else {
+        selectedFiles = await picker.pickMultiImage(imageQuality: 80);
+      }
+    }
+
+    if (selectedFiles.isEmpty) return;
+
+    final bool confirm = await _confirmSendMultiMedia(selectedFiles, isVideo: isVideo);
+    if (!confirm) return;
+
+    setState(() => _isSending = true);
+
+    int successCount = 0;
+    for (var xfile in selectedFiles) {
+      final bool success = await _uploadOneFile(File(xfile.path), isVideo ? 'video' : 'image');
+      if (success) successCount++;
+    }
+
+    if (mounted) {
+      setState(() => _isSending = false);
+      if (successCount > 0) {
+        await _fetchMessages();
+        _scrollToBottom();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
+      }
+    }
+  }
+
+  Future<bool> _uploadOneFile(File file, String type) async {
+    try {
+      var request = http.MultipartRequest('POST', Uri.parse('$_apiUrl/api/messages/upload'));
+      request.fields['senderId'] = widget.currentUserId.toString();
+      request.fields['receiverId'] = widget.otherUserId.toString();
+      request.fields['messageType'] = type;
+
+      final mimeType = lookupMimeType(file.path);
+      request.files.add(await http.MultipartFile.fromPath('file', file.path, contentType: MediaType.parse(mimeType ?? 'application/octet-stream')));
+
+      final response = await request.send();
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> _recallMessage(int messageId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiUrl/api/messages/recall'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'messageId': messageId, 'userId': widget.currentUserId}),
+      );
+      if (response.statusCode == 200) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已撤回')));
+        _fetchMessages();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('撤回失败')));
+    }
+  }
+
+  void _showMessageOptions(int messageId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 20),
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.undo, color: Colors.orange),
+                title: const Text("撤回消息", style: TextStyle(fontWeight: FontWeight.bold)),
+                onTap: () => _recallMessage(messageId),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text("取消"),
+                onTap: () => Navigator.pop(context),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMediaPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: 180,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildOptionItem(Icons.image, "相册", () { Navigator.pop(context); _pickAndSendMedia(isVideo: false, isCamera: false); }),
+            _buildOptionItem(Icons.camera_alt, "拍照", () { Navigator.pop(context); _pickAndSendMedia(isVideo: false, isCamera: true); }),
+            _buildOptionItem(Icons.videocam, "视频", () { Navigator.pop(context); _pickAndSendMedia(isVideo: true, isCamera: false); }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionItem(IconData icon, String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(15)),
+            child: Icon(icon, size: 30, color: Colors.black87),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients && _scrollController.position.hasContentDimensions) {
-        final position = _scrollController.position.maxScrollExtent;
-        if (isAnimated) {
-          _scrollController.animateTo(
-            position,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        } else {
-          _scrollController.jumpTo(position);
-        }
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }
 
-  // 封装跳转到资料页的方法
   void _navigateToProfile(int userId, String nickname, String avatar) {
-    Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => UserProfilePage(
-          currentUserId: widget.currentUserId,
-          targetUserId: userId,
-          nickname: nickname,
-          avatarUrl: avatar,
-          introduction: "", // 聊天页暂时不传简介，进页面后再获取
-          myAvatarUrl: widget.currentUserAvatar,
-        ))
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfilePage(
+      currentUserId: widget.currentUserId, targetUserId: userId, nickname: nickname, avatarUrl: avatar, introduction: "", myAvatarUrl: widget.currentUserAvatar,
+    )));
+  }
+
+  void _viewMedia(String currentUrl) {
+    final mediaMessages = _messages.where((m) {
+      final type = m['message_type'];
+      return (type == 'image' || type == 'video') && m['media_url'] != null;
+    }).toList().reversed.toList();
+
+    final List<MediaItem> galleryItems = mediaMessages.map((m) {
+      final isMe = m['sender_id'] == widget.currentUserId;
+      return MediaItem(
+        id: m['id'], mediaUrl: m['media_url'], mediaType: m['message_type'],
+        userNickname: isMe ? "我" : widget.otherUserNickname,
+        userAvatarUrl: isMe ? widget.currentUserAvatar : widget.otherUserAvatar,
+      );
+    }).toList();
+
+    final initialIndex = galleryItems.indexWhere((item) => item.mediaUrl == currentUrl);
+    if (initialIndex == -1) return;
+
+    Navigator.push(context, MaterialPageRoute(builder: (_) =>
+        MediaViewerPage(mediaItems: galleryItems, initialIndex: initialIndex, viewerId: widget.currentUserId, apiUrl: _apiUrl, isPureView: true)
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      // 保持加载状态
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scrollToBottom(isAnimated: false);
-      });
-    }
-
     return Scaffold(
-      // 👇👇👇 核心修改 1：点击标题栏跳转资料页 👇👇👇
       appBar: AppBar(
         title: GestureDetector(
           onTap: () => _navigateToProfile(widget.otherUserId, widget.otherUserNickname, widget.otherUserAvatar),
           child: Row(
-            mainAxisSize: MainAxisSize.min, // 紧凑布局
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text(widget.otherUserNickname),
               const SizedBox(width: 4),
@@ -211,9 +384,8 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _messages.isEmpty
-                ? const Center(child: Text('还没有消息，打个招呼吧！'))
                 : ListView.builder(
+              reverse: true,
               controller: _scrollController,
               padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
               itemCount: _messages.length,
@@ -225,30 +397,25 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
             ),
           ),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(8.0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
               child: Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _textController,
+                      minLines: 1, maxLines: 5,
                       decoration: InputDecoration(
                         hintText: '发送消息...',
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10),
                       ),
-                      onSubmitted: _isSending ? null : (_) => _sendMessage(),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: _isSending ? null : _sendMessage,
-                    style: IconButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                    ),
-                  ),
+                  _showSendButton
+                      ? IconButton(icon: const Icon(Icons.send), onPressed: _isSending ? null : _sendMessage, style: IconButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white))
+                      : IconButton(icon: const Icon(Icons.add_circle_outline, size: 30), color: Colors.grey[600], onPressed: _showMediaPicker),
                 ],
               ),
             ),
@@ -259,54 +426,138 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   }
 
   Widget _buildMessageItem(bool isMe, dynamic message) {
-    // 确定头像对应的用户信息
+    final String type = message['message_type'] ?? 'text';
+
+    if (type == 'recalled') {
+      return Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(isMe ? "你撤回了一条消息" : "\"${widget.otherUserNickname}\" 撤回了一条消息", style: const TextStyle(color: Colors.grey, fontSize: 12))));
+    }
+
     final avatarUrl = isMe ? widget.currentUserAvatar : widget.otherUserAvatar;
     final userId = isMe ? widget.currentUserId : widget.otherUserId;
-    final nickname = isMe ? "我" : widget.otherUserNickname;
+    final String? mediaUrl = message['media_url'];
 
-    // 👇👇👇 核心修改 2：点击头像跳转 👇👇👇
-    Widget avatarWidget = GestureDetector(
-      onTap: () => _navigateToProfile(userId, nickname, avatarUrl),
-      child: CircleAvatar(
-        radius: 20,
-        backgroundImage: NetworkImage(avatarUrl),
-      ),
-    );
+    Widget contentWidget;
 
-    final children = <Widget>[
-      avatarWidget,
-      const SizedBox(width: 10),
-      Flexible(
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 14.0),
-          decoration: BoxDecoration(
-            color: isMe
-                ? Theme.of(context).colorScheme.primaryContainer
-                : Theme.of(context).colorScheme.surfaceVariant,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(18),
-              topRight: const Radius.circular(18),
-              bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
-              bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
-            ),
-          ),
-          child: Text(
-            message['content'],
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontSize: 16,
-            ),
-          ),
+    if (type == 'image' && mediaUrl != null) {
+      contentWidget = GestureDetector(
+        onTap: () => _viewMedia(mediaUrl),
+        child: Hero(tag: mediaUrl, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 200, maxHeight: 300), child: Image.network(mediaUrl, fit: BoxFit.cover, loadingBuilder: (ctx, child, loading) => loading == null ? child : Container(width: 150, height: 150, color: Colors.grey[200], child: const Center(child: CircularProgressIndicator())))))),
+      );
+    } else if (type == 'video' && mediaUrl != null) {
+      // 👇👇👇 核心修改：使用 VideoMessageBubble 显示封面 👇👇👇
+      contentWidget = GestureDetector(
+        onTap: () => _viewMedia(mediaUrl),
+        child: VideoMessageBubble(videoUrl: mediaUrl), // 使用自定义组件
+      );
+    } else {
+      contentWidget = Container(
+        padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 14.0),
+        decoration: BoxDecoration(
+          color: isMe ? Colors.blue[100] : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white),
+          borderRadius: BorderRadius.circular(8),
         ),
-      ),
-    ];
+        child: Text(message['content'] ?? '', style: TextStyle(color: isMe ? Colors.black : Theme.of(context).colorScheme.onSurface, fontSize: 16)),
+      );
+    }
+
+    if (isMe) {
+      contentWidget = GestureDetector(
+        onLongPress: () => _showMessageOptions(message['id']),
+        child: contentWidget,
+      );
+    }
+
+    Widget avatarWidget = GestureDetector(onTap: () => _navigateToProfile(userId, isMe ? "我" : widget.otherUserNickname, avatarUrl), child: CircleAvatar(radius: 20, backgroundImage: NetworkImage(avatarUrl)));
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: isMe ? children.reversed.toList() : children,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isMe) ...[avatarWidget, const SizedBox(width: 10)],
+          Flexible(child: contentWidget),
+          if (isMe) ...[const SizedBox(width: 10), avatarWidget],
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 3. 【核心新增】视频气泡组件 (加载第一帧封面)
+// ==========================================
+class VideoMessageBubble extends StatefulWidget {
+  final String videoUrl;
+  const VideoMessageBubble({super.key, required this.videoUrl});
+
+  @override
+  State<VideoMessageBubble> createState() => _VideoMessageBubbleState();
+}
+
+class _VideoMessageBubbleState extends State<VideoMessageBubble> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+    try {
+      await _controller!.initialize();
+      if (mounted) {
+        setState(() { _isInitialized = true; });
+      }
+    } catch (e) {
+      // 初始化失败，显示黑底
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 200,
+        height: 250,
+        color: Colors.black,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (_isInitialized && _controller != null)
+            // 显示第一帧 (FittedBox cover 模式)
+              SizedBox.expand(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _controller!.value.size.width,
+                    height: _controller!.value.size.height,
+                    child: VideoPlayer(_controller!),
+                  ),
+                ),
+              ),
+
+            // 播放按钮遮罩
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.3),
+                shape: BoxShape.circle,
+              ),
+              padding: const EdgeInsets.all(12),
+              child: const Icon(Icons.play_arrow, color: Colors.white, size: 40),
+            ),
+          ],
+        ),
       ),
     );
   }

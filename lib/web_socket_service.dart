@@ -1,20 +1,24 @@
-// === web_socket_service.dart (最终心跳版 - 完整代码) ===
+// === web_socket_service.dart (支持多媒体消息通知版) ===
 
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-// 定义一个简单的新消息模型，用于事件传递
+// 1. 【核心修改】扩展事件模型，支持媒体类型
 class NewMessageEvent {
   final int conversationId;
   final int senderId;
   final String content;
+  final String messageType; // 'text', 'image', 'video'
+  final String? mediaUrl;
 
   NewMessageEvent({
     required this.conversationId,
     required this.senderId,
     required this.content,
+    this.messageType = 'text',
+    this.mediaUrl,
   });
 }
 
@@ -26,7 +30,7 @@ class WebSocketService {
   WebSocketChannel? _channel;
   final ValueNotifier<NewMessageEvent?> newMessageNotifier = ValueNotifier(null);
   bool _isConnected = false;
-  Timer? _heartbeatTimer; // 心跳定时器
+  Timer? _heartbeatTimer;
 
   void connect(int userId) {
     if (_isConnected) {
@@ -34,86 +38,84 @@ class WebSocketService {
       return;
     }
 
+    // ！！！！请务必确认 IP 地址正确！！！！
     final uri = Uri.parse('ws://192.168.23.18:3000?userId=$userId');
-    // 【新增日志】
     print("--- [WebSocket][探针] 准备连接到地址: $uri");
 
     try {
       _channel = WebSocketChannel.connect(uri);
       _isConnected = true;
-      print("--- [WebSocket] WebSocketChannel.connect() 调用成功，正在等待流事件...");
+      print("--- [WebSocket] 连接成功，等待消息...");
 
       _startHeartbeat();
 
       _channel!.stream.listen(
             (data) {
-          print("--- [WebSocket] 前端收到原始数据: $data");
+          // print("--- [WebSocket] 收到数据: $data"); // 调试用，太长可以注释掉
           try {
             final message = json.decode(data);
+
+            // 2. 【核心修改】解析 newMessage 并提取多媒体字段
             if (message['type'] == 'newMessage') {
-              print("--- [WebSocket] 确认是新消息类型，准备通知监听者...");
+              print("--- [WebSocket] 收到新消息通知");
               final payload = message['payload'];
+
               newMessageNotifier.value = NewMessageEvent(
                 conversationId: payload['conversationId'],
                 senderId: payload['senderId'],
-                content: payload['content'],
+                content: payload['content'], // 这里的 content 是 "[图片]" 或 "[视频]"
+                messageType: payload['messageType'] ?? 'text', // 获取类型
+                mediaUrl: payload['mediaUrl'], // 获取链接
               );
-              // 重置 notifier 的值，以便下次相同内容的通知也能被触发
+
+              // 重置通知，确保连续收到相同消息也能触发监听
               newMessageNotifier.value = null;
             }
           } catch (e) {
-            print("--- [WebSocket][错误] 前端解析数据失败: $e");
+            print("--- [WebSocket][错误] 解析数据失败: $e");
           }
-            },
+        },
         onDone: () {
-          print("--- [WebSocket][探针] onDone 事件触发：连接已正常关闭。");
+          print("--- [WebSocket] 连接断开(onDone)");
           _handleDisconnect();
         },
         onError: (error) {
-          // 【核心改造】打印更详细的错误
-          print("--- [WebSocket][探针][严重错误] onError 事件触发: $error");
+          print("--- [WebSocket] 连接错误: $error");
           _handleDisconnect();
         },
-        cancelOnError: true, // 【新增】一旦出错，就自动取消订阅
+        cancelOnError: true,
       );
     } catch (e) {
-      print("--- [WebSocket][探针][严重错误] WebSocketChannel.connect() 调用时直接抛出异常: $e");
+      print("--- [WebSocket] 连接异常: $e");
       _isConnected = false;
     }
   }
 
   void disconnect() {
     if (_isConnected) {
-      print("--- [WebSocket] 已主动断开连接");
+      print("--- [WebSocket] 主动断开");
       _handleDisconnect();
     }
   }
 
-  // 【新增】统一处理断开连接的逻辑
   void _handleDisconnect() {
     _stopHeartbeat();
     _channel?.sink.close();
     _isConnected = false;
   }
 
-  // 【新增】启动心跳的函数
   void _startHeartbeat() {
-    // 先取消可能存在的旧定时器
     _heartbeatTimer?.cancel();
-    // 创建新的定时器
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (timer) {
       if (_isConnected) {
-        final pingMessage = json.encode({'type': 'ping'});
-        _channel?.sink.add(pingMessage);
-        print("--- [WebSocket] >-- 发送心跳: $pingMessage");
+        // 发送简单的心跳包
+        _channel?.sink.add(json.encode({'type': 'ping'}));
       }
     });
   }
 
-  // 【新增】停止心跳的函数
   void _stopHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
-    print("--- [WebSocket] 心跳已停止。");
   }
 }
