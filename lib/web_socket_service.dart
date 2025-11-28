@@ -71,6 +71,14 @@ class WebSocketService {
               // 重置通知，确保连续收到相同消息也能触发监听
               newMessageNotifier.value = null;
             }
+            else if (message['type'] == 'notification') {
+              // 这里其实不需要 payload 存什么，只要触发一下 value 变动，
+              // PhotoGalleryPage 监听到变动就会去 fetch unread count
+              // 为了方便，你可以复用 newMessageNotifier，或者新建一个 notificationNotifier
+              // 偷懒做法：发一个空的事件触发监听
+              newMessageNotifier.value = NewMessageEvent(conversationId: 0, senderId: 0, content: "");
+              newMessageNotifier.value = null;
+            }
           } catch (e) {
             print("--- [WebSocket][错误] 解析数据失败: $e");
           }

@@ -473,14 +473,15 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
 }
 
 // ==========================================
-// 4. 评论底部弹窗 (保持不变)
+// ==========================================
+// 3. 评论底部弹窗组件 (自动刷新版)
 // ==========================================
 class _CommentsBottomSheet extends StatefulWidget {
-  final List<dynamic> comments;
+  final List<dynamic> comments; // 初始评论数据
   final int photoId;
   final int viewerId;
   final String apiUrl;
-  final VoidCallback onCommentSuccess;
+  final VoidCallback onCommentSuccess; // 通知父组件刷新
 
   const _CommentsBottomSheet({
     required this.comments,
@@ -497,17 +498,63 @@ class _CommentsBottomSheet extends StatefulWidget {
 class _CommentsBottomSheetState extends State<_CommentsBottomSheet> {
   final TextEditingController _textController = TextEditingController();
 
+  // 👇 1. 本地维护一个评论列表，初始化时使用父组件传进来的数据
+  late List<dynamic> _localComments;
+
+  // 回复状态
+  Map<String, dynamic>? _replyToUser;
+
+  @override
+  void initState() {
+    super.initState();
+    // 初始化列表
+    _localComments = widget.comments;
+  }
+
+  // 👇 2. 新增：自己在弹窗内部获取最新评论的方法
+  Future<void> _refreshLocalComments() async {
+    try {
+      // 复用获取详情的接口，只取 comments 部分
+      final res = await http.get(Uri.parse('${widget.apiUrl}/api/photos/detail/${widget.photoId}?viewerId=${widget.viewerId}'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body)['data'];
+        if (mounted) {
+          setState(() {
+            _localComments = data['comments'];
+          });
+        }
+      }
+    } catch (e) {
+      print("刷新评论失败: $e");
+    }
+  }
+
   Future<void> _sendComment() async {
     if (_textController.text.trim().isEmpty) return;
     try {
+      final Map<String, dynamic> body = {
+        'photoId': widget.photoId,
+        'userId': widget.viewerId,
+        'content': _textController.text
+      };
+
+      if (_replyToUser != null) {
+        body['replyToUserId'] = _replyToUser!['user_id'];
+      }
+
       final res = await http.post(
           Uri.parse('${widget.apiUrl}/api/photos/comment'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'photoId': widget.photoId, 'userId': widget.viewerId, 'content': _textController.text})
+          body: jsonEncode(body)
       );
+
       if (res.statusCode == 200) {
         _textController.clear();
+        setState(() => _replyToUser = null);
         FocusScope.of(context).unfocus();
+
+        // 👇 3. 核心修改：发送成功后，先刷新自己(弹窗)的列表，再通知父组件
+        await _refreshLocalComments();
         widget.onCommentSuccess();
       }
     } catch (e) { print(e); }
@@ -516,68 +563,133 @@ class _CommentsBottomSheetState extends State<_CommentsBottomSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
     return Container(
       height: MediaQuery.of(context).size.height * 0.7,
       padding: EdgeInsets.only(bottom: bottomInset),
       child: Column(
         children: [
+          // 顶部标题 (使用 _localComments 的长度)
           Container(
             padding: const EdgeInsets.symmetric(vertical: 15),
             alignment: Alignment.center,
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white12))),
-            child: Text("${widget.comments.length} 条评论", style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+            child: Text("${_localComments.length} 条评论", style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
           ),
+
+          // 评论列表 (使用 _localComments)
           Expanded(
-            child: widget.comments.isEmpty
+            child: _localComments.isEmpty
                 ? const Center(child: Text("暂无评论，快来抢沙发~", style: TextStyle(color: Colors.grey)))
                 : ListView.builder(
               padding: const EdgeInsets.all(16),
-              itemCount: widget.comments.length,
+              itemCount: _localComments.length,
               itemBuilder: (context, index) {
-                final c = widget.comments[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(radius: 16, backgroundImage: NetworkImage(c['avatar_url'] ?? ''), backgroundColor: Colors.grey),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(c['nickname'], style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                            const SizedBox(height: 4),
-                            Text(c['content'], style: const TextStyle(color: Colors.white, fontSize: 14)),
-                          ],
+                final c = _localComments[index];
+                return InkWell(
+                  onTap: () {
+                    setState(() {
+                      _replyToUser = {
+                        'user_id': c['user_id'],
+                        'nickname': c['nickname']
+                      };
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CircleAvatar(
+                            radius: 16,
+                            backgroundImage: NetworkImage(c['avatar_url'] ?? ''),
+                            backgroundColor: Colors.grey
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(c['nickname'], style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                              const SizedBox(height: 4),
+                              RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                                  children: [
+                                    if (c['reply_nickname'] != null) ...[
+                                      const TextSpan(text: "回复 "),
+                                      TextSpan(
+                                          text: "@${c['reply_nickname']} ",
+                                          style: const TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold)
+                                      ),
+                                    ],
+                                    TextSpan(text: c['content']),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12))),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(24)),
-                    child: TextField(
-                      controller: _textController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(hintText: "说点什么...", hintStyle: TextStyle(color: Colors.white38), border: InputBorder.none),
-                    ),
+
+          // 底部输入区域
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_replyToUser != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  color: Colors.white10,
+                  child: Row(
+                    children: [
+                      Text(
+                          "回复 @${_replyToUser!['nickname']}",
+                          style: const TextStyle(color: Colors.grey, fontSize: 12)
+                      ),
+                      const Spacer(),
+                      GestureDetector(
+                        onTap: () => setState(() => _replyToUser = null),
+                        child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                      )
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                IconButton(onPressed: _sendComment, icon: const Icon(Icons.send, color: Colors.blue)),
-              ],
-            ),
+
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12))),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(24)),
+                        child: TextField(
+                          controller: _textController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                              hintText: _replyToUser != null
+                                  ? "回复 @${_replyToUser!['nickname']}..."
+                                  : "说点什么...",
+                              hintStyle: const TextStyle(color: Colors.white38),
+                              border: InputBorder.none
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton(onPressed: _sendComment, icon: const Icon(Icons.send, color: Colors.blue)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),

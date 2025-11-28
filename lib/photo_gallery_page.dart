@@ -10,6 +10,8 @@ import 'package:mime/mime.dart';
 import 'package:http_parser/http_parser.dart';
 import 'media_viewer_page.dart'; // 导入大图/视频查看器
 
+import 'web_socket_service.dart'; // 导入 ws
+import 'notification_page.dart'; // 导入新页面
 // 数据模型
 class MediaItem {
   final int id;
@@ -133,12 +135,41 @@ class PhotoGalleryPage extends StatefulWidget {
 class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
   List<MediaItem> _mediaItems = [];
   bool _isLoading = true;
+  int _unreadCount = 0; // 🔔 新增：未读数
   final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
     _fetchGallery();
+    _fetchUnreadCount(); // 获取初始未读数
+
+    // 监听 WebSocket
+    WebSocketService().newMessageNotifier.addListener(_onWsNotification);
+  }
+
+  @override
+  void dispose() {
+    WebSocketService().newMessageNotifier.removeListener(_onWsNotification);
+    super.dispose();
+  }
+
+  // 监听 WS 事件
+  void _onWsNotification() {
+    // 这里的逻辑需要 WebSocketService 支持 'notification' 类型
+    // 简单起见，只要有 WS 消息来，我们就刷新一下未读数
+    // 更好的做法是在 WebSocketService 里解析 type: notification
+    _fetchUnreadCount();
+  }
+
+  Future<void> _fetchUnreadCount() async {
+    try {
+      final res = await http.get(Uri.parse('$_apiUrl/api/notifications/unread/count?userId=${widget.viewerId}'));
+      if (res.statusCode == 200) {
+        final count = jsonDecode(res.body)['count'];
+        if(mounted) setState(() => _unreadCount = count);
+      }
+    } catch(e){}
   }
 
   Future<void> _fetchGallery() async {
@@ -209,7 +240,35 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.isMe ? '我的照片墙' : 'TA的照片墙')),
+      appBar: AppBar(title: Text(widget.isMe ? '我的照片墙' : 'TA的照片墙'),
+      // 👇👇👇 新增：右上角消息入口 👇👇👇
+      actions: [
+        if (widget.isMe) // 只有看自己照片墙时才显示消息中心
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none),
+                onPressed: () async {
+                  // 跳转消息页
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationPage(userId: widget.viewerId)));
+                  // 返回后清空红点
+                  _fetchUnreadCount();
+                },
+              ),
+              if (_unreadCount > 0)
+                Positioned(
+                  top: 10, right: 10,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                    child: Text("$_unreadCount", style: const TextStyle(color: Colors.white, fontSize: 10)),
+                  ),
+                )
+            ],
+          )
+      ],
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _mediaItems.isEmpty
