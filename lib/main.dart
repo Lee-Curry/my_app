@@ -287,68 +287,355 @@ class _MainScreenState extends State<MainScreen> {
   }
   }
 
-class HomePage extends StatelessWidget {
+// === 替换原本的 HomePage ===
+
+class HomePage extends StatefulWidget {
   final int userId;
   const HomePage({super.key, required this.userId});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  String _nickname = "朋友";
+  String _greeting = "你好";
+  // 👇 1. 新增变量：默认显示加载中，或者一句通用的兜底文案
+  String _dailyQuote = "正在获取今日份的治愈...";
+  // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000';
+
+  @override
+  void initState() {
+    super.initState();
+    _updateGreeting();
+    _fetchUserInfo();
+    _fetchDailyQuote(); // 👇 2. 调用获取寄语
+  }
+
+  void _updateGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 6) {
+      _greeting = "夜深了";
+    } else if (hour < 12) {
+      _greeting = "早上好";
+    } else if (hour < 18) {
+      _greeting = "下午好";
+    } else {
+      _greeting = "晚上好";
+    }
+  }
+
+  Future<void> _fetchUserInfo() async {
+    try {
+      final response = await http.get(Uri.parse('$_apiUrl/api/profile/${widget.userId}'));
+      if (mounted && response.statusCode == 200) {
+        final data = json.decode(response.body)['data'];
+        setState(() {
+          _nickname = data['nickname'] ?? "朋友";
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // 👇 3. 新增获取寄语的方法
+  Future<void> _fetchDailyQuote() async {
+    try {
+      final response = await http.get(Uri.parse('$_apiUrl/api/daily-quote'));
+      if (mounted && response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _dailyQuote = data['data'];
+        });
+      }
+    } catch (e) {
+      // 如果报错，保持默认文案或者设置一个静态文案
+      if (mounted) setState(() => _dailyQuote = "生活明朗，万物可爱。");
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Expanded(
-            flex: 2,
-            child: GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => PhotoGalleryPage(
-                      userId: userId,        // 看的是谁（这里是看自己）
-                      viewerId: userId,      // 观看者是谁（也是自己）
-                      isMe: true,            // 标记为看自己，这样才有上传按钮
+    // 判断当前主题是否是深色模式
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
+    return Scaffold(
+      // 首页不需要标准的 AppBar，用 SafeArea 自己写一个头部
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: // 👇👇👇 优化后的头部设计 👇👇👇
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 1. 问候语：变小，颜色变淡，作为一种温柔的提醒
+              Text(
+                "$_greeting,",
+                style: TextStyle(
+                  fontSize: 16, // 从 28 降到 16，精致很多
+                  fontWeight: FontWeight.normal, // 去掉粗体，更轻盈
+                  color: subTextColor, // 使用副文本颜色（灰色），不抢眼
+                ),
+              ),
+              const SizedBox(height: 4), // 间距稍微拉近一点
+
+              // 2. 名字：作为视觉重心，保留辨识度，但不用巨型字体
+              Text(
+                _nickname,
+                style: TextStyle(
+                  fontSize: 24, // 从 28 降到 24，刚好够大
+                  fontWeight: FontWeight.bold, // 加粗，强调身份
+                  // 颜色逻辑保持不变
+                  color: isDark ? Colors.blue[200] : Theme.of(context).primaryColor,
+                  letterSpacing: 1.0, // 加一点字间距，更有呼吸感
+                ),
+              ),
+              // 👆👆👆 修改结束 👆👆👆
+              const SizedBox(height: 8), // 缩小名字和副标题的间距
+              Text(
+                "今天想聊点什么，还是看看回忆？",
+                style: TextStyle(fontSize: 14, color: subTextColor?.withOpacity(0.7)), // 稍微再小一点
+              ),
+
+              const SizedBox(height: 30), // 这里的间距可以适当调整
+
+              // 2. AI 助手大卡片 (暖色渐变)
+              _buildHeroCard(
+                context,
+                title: "AI 助手",
+                subtitle: "你的全天候智能伙伴",
+                icon: Icons.chat_bubble_outline,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFFF9A9E), Color(0xFFFECFEF)], // 暖粉橙色
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => ChatSessionsListPage(userId: widget.userId)),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              // 3. 功能区 Grid (照片墙 + 心情)
+              Row(
+                children: [
+                  // 左边：照片墙 (冷色渐变)
+                  Expanded(
+                    flex: 3, // 占 3 份宽
+                    child: _buildGridCard(
+                      context,
+                      title: "照片墙",
+                      subtitle: "定格美好瞬间",
+                      icon: Icons.photo_library_outlined,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFA18CD1), Color(0xFFFBC2EB)], // 紫色系
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      height: 190,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => PhotoGalleryPage(
+                              userId: widget.userId,
+                              viewerId: widget.userId,
+                              isMe: true,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                );
-              },
-              child: Card(
-                clipBehavior: Clip.antiAlias,
+                  const SizedBox(width: 15),
+                  // 右边：心情日记 (或者其他功能)
+                  Expanded(
+                    flex: 2, // 占 2 份宽
+                    child: _buildGridCard(
+                      context,
+                      title: "心情",
+                      subtitle: "记录当下",
+                      icon: Icons.mood,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF84FAB0), Color(0xFF8FD3F4)], // 青蓝色系
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      height: 190,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => MoodTrackerPage(userId: widget.userId),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // 4. 每日寄语卡片 (使用 _dailyQuote 变量)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.photo_library, size: 48, color: Theme.of(context).colorScheme.primary),
-                    const SizedBox(height: 16),
-                    const Text('照片墙', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                    Row(children: [
+                      const Icon(Icons.lightbulb_outline, size: 20, color: Colors.amber),
+                      const SizedBox(width: 8),
+                      Text("每日寄语", style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                    ]),
+                    const SizedBox(height: 10),
+                    // 👇👇👇 这里使用动态获取的文字 👇👇👇
+                    Text(
+                      _dailyQuote,
+                      style: TextStyle(
+                        fontStyle: FontStyle.italic,
+                        color: subTextColor,
+                        fontSize: 15,
+                        height: 1.5, // 增加一点行高，更好看
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 16),
-          Expanded(
-            flex: 1,
-            child: GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => ChatSessionsListPage(userId: userId)),
-                );
-              },
-              child: Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.chat_bubble_outline, size: 48, color: Theme.of(context).colorScheme.secondary),
-                    const SizedBox(height: 16),
-                    const Text('AI 助手', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                  ],
-                ),
+        ),
+      ),
+    );
+  }
+
+  // 构建通用的英雄大卡片
+  Widget _buildHeroCard(BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Gradient gradient,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        height: 170,
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // 背景装饰图标
+            Positioned(
+              right: -20,
+              bottom: -20,
+              child: Icon(icon, size: 150, color: Colors.white.withOpacity(0.2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, color: Colors.white, size: 28),
+                  ),
+                  const Spacer(),
+                  Text(
+                    title,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 14, color: Colors.white.withOpacity(0.9)),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 构建 Grid 小卡片
+  Widget _buildGridCard(BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Gradient gradient,
+    required double height,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: height,
+        decoration: BoxDecoration(
+          gradient: gradient,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -10,
+              top: -10,
+              child: Icon(icon, size: 100, color: Colors.white.withOpacity(0.2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(icon, color: Colors.white, size: 28),
+                  const SizedBox(height: 10),
+                  Text(
+                    title,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.9)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -444,6 +731,32 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // 显示退出确认弹窗
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("退出登录"),
+          content: const Text("确定要退出当前账号吗？"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context), // 关闭弹窗
+              child: const Text("取消", style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context); // 先关闭弹窗
+                widget.onLogout();      // 再执行原本的退出逻辑
+              },
+              child: const Text("退出", style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_profileData == null) {
@@ -534,7 +847,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   leading: const Icon(Icons.logout),
                   title: const Text('退出登录'),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: widget.onLogout,
+                  onTap: _showLogoutDialog, // 👈 现在改成调用弹窗函数
                 ),
               ],
             ),
