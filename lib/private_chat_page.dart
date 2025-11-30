@@ -1,4 +1,4 @@
-// === private_chat_page.dart (视频封面修复版 - 完整代码) ===
+// === private_chat_page.dart (神级布局：兼容长短对话 + 完美键盘) ===
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -8,7 +8,7 @@ import 'dart:async';
 import 'package:image_picker/image_picker.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:mime/mime.dart';
-import 'package:video_player/video_player.dart'; // 👈 必须导入这个
+import 'package:video_player/video_player.dart';
 import 'user_profile_page.dart';
 import 'photo_gallery_page.dart';
 import 'media_viewer_page.dart';
@@ -37,6 +37,7 @@ class PrivateChatPage extends StatefulWidget {
 class _PrivateChatPageState extends State<PrivateChatPage> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+
   List<dynamic> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
@@ -44,11 +45,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
   Timer? _timer;
   int? _conversationId;
+  // ！！！！请务必替换为您自己的IP地址！！！！
   final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
+    // 不需要 WidgetsBindingObserver 了，reverse: true 原生支持键盘
     _initializeChat();
     _textController.addListener(() {
       setState(() { _showSendButton = _textController.text.trim().isNotEmpty; });
@@ -66,7 +69,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   }
 
   void _onWsEvent() {
-    if (mounted) _fetchMessages();
+    if (mounted) _fetchMessages(isWsTrigger: true);
   }
 
   Future<void> _initializeChat() async {
@@ -91,7 +94,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     } catch (e) {}
   }
 
-  Future<void> _fetchMessages({bool isInitialLoad = false}) async {
+  Future<void> _fetchMessages({bool isInitialLoad = false, bool isWsTrigger = false}) async {
     if (_conversationId == null) {
       if(isInitialLoad && mounted) setState(() { _isLoading = false; });
       return;
@@ -100,11 +103,21 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       final response = await http.get(Uri.parse('$_apiUrl/api/messages/$_conversationId'));
       if (mounted && response.statusCode == 200) {
         final data = json.decode(response.body)['data'];
+
+        // 1. 【核心】倒序排列 (最新消息在 Index 0)
         final List newMessages = (data as List).reversed.toList();
+
         if (jsonEncode(_messages) != jsonEncode(newMessages)) {
           setState(() { _messages = newMessages; });
+
+          // 如果收到新消息，平滑滚动到底部(0.0)
+          // 首次加载不需要滚，因为 reverse:true 默认就在底部
+          if (isWsTrigger) {
+            _scrollToBottom();
+          }
         }
       }
+
       if (isInitialLoad) {
         await http.put(Uri.parse('$_apiUrl/api/messages/mark-read/$_conversationId/${widget.currentUserId}'));
         if (mounted) setState(() { _isLoading = false; });
@@ -114,11 +127,46 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
   }
 
+  void _scrollToBottom({bool animated = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        if (animated) {
+          _scrollController.animateTo(
+            0.0, // 倒序模式下，0.0 就是最底部
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutQuad,
+          );
+        } else {
+          _scrollController.jumpTo(0.0);
+        }
+      }
+    });
+  }
+
+  // 2. 【核心】发送消息：乐观更新 + 秒滑到底
   Future<void> _sendMessage() async {
-    if (!_showSendButton || _isSending) return;
+    if (!_showSendButton) return;
     final content = _textController.text.trim();
     _textController.clear();
-    setState(() { _isSending = true; _showSendButton = false; });
+    setState(() { _showSendButton = false; });
+
+    final tempMessage = {
+      'id': -1,
+      'sender_id': widget.currentUserId,
+      'receiver_id': widget.otherUserId,
+      'content': content,
+      'message_type': 'text',
+      'media_url': null,
+      'created_at': DateTime.now().toString(),
+    };
+
+    // 插入到列表头 (即屏幕最下方)
+    setState(() {
+      _messages.insert(0, tempMessage);
+    });
+
+    // 立即滚动到 0.0
+    _scrollToBottom(animated: true);
 
     try {
       final response = await http.post(
@@ -132,12 +180,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       );
       if (mounted && response.statusCode == 201) {
         await _fetchMessages();
-        _scrollToBottom();
       }
     } catch (e) {
       if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
-    } finally {
-      if(mounted) setState(() { _isSending = false; });
     }
   }
 
@@ -196,7 +241,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     final bool confirm = await _confirmSendMultiMedia(selectedFiles, isVideo: isVideo);
     if (!confirm) return;
 
-    setState(() => _isSending = true);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在后台发送...'), duration: Duration(milliseconds: 1000)));
 
     int successCount = 0;
     for (var xfile in selectedFiles) {
@@ -205,10 +250,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
 
     if (mounted) {
-      setState(() => _isSending = false);
       if (successCount > 0) {
         await _fetchMessages();
-        _scrollToBottom();
+        _scrollToBottom(animated: true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
       }
@@ -262,22 +306,10 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 20),
-                width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-              ),
-              ListTile(
-                leading: const Icon(Icons.undo, color: Colors.orange),
-                title: const Text("撤回消息", style: TextStyle(fontWeight: FontWeight.bold)),
-                onTap: () => _recallMessage(messageId),
-              ),
+              Container(margin: const EdgeInsets.only(top: 10, bottom: 20), width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              ListTile(leading: const Icon(Icons.undo, color: Colors.orange), title: const Text("撤回消息", style: TextStyle(fontWeight: FontWeight.bold)), onTap: () => _recallMessage(messageId)),
               const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.close),
-                title: const Text("取消"),
-                onTap: () => Navigator.pop(context),
-              ),
+              ListTile(leading: const Icon(Icons.close), title: const Text("取消"), onTap: () => Navigator.pop(context)),
               const SizedBox(height: 10),
             ],
           ),
@@ -326,13 +358,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     );
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
-    });
-  }
 
   void _navigateToProfile(int userId, String nickname, String avatar) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfilePage(
@@ -345,6 +370,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       final type = m['message_type'];
       return (type == 'image' || type == 'video') && m['media_url'] != null;
     }).toList().reversed.toList();
+    // 注意：_messages是[新->旧]，这里需要reversed变成[旧->新]给ViewMedia，这样左滑才是历史图片
 
     final List<MediaItem> galleryItems = mediaMessages.map((m) {
       final isMe = m['sender_id'] == widget.currentUserId;
@@ -359,7 +385,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     if (initialIndex == -1) return;
 
     Navigator.push(context, MaterialPageRoute(builder: (_) =>
-        MediaViewerPage(mediaItems: galleryItems, initialIndex: initialIndex, viewerId: widget.currentUserId, apiUrl: _apiUrl, isPureView: true)
+        MediaViewerPage(
+            mediaItems: galleryItems,
+            initialIndex: initialIndex,
+            viewerId: widget.currentUserId,
+            apiUrl: _apiUrl,
+            isPureView: true
+        )
     ));
   }
 
@@ -382,33 +414,48 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       body: Column(
         children: [
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : ListView.builder(
-              reverse: true,
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final message = _messages[index];
-                final isMe = message['sender_id'] == widget.currentUserId;
-                return _buildMessageItem(isMe, message);
-              },
+            // 3. 【核心布局魔法】Align + ShrinkWrap + Reverse
+            child: Align(
+              alignment: Alignment.topCenter, // 列表内容少时，强制靠上！
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView.builder(
+                reverse: true, // 倒序：保证键盘顶起无延迟，长对话自动到底
+                shrinkWrap: true, // 收缩：保证短对话能被 Align 拉到顶部
+                controller: _scrollController,
+                padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
+                itemCount: _messages.length,
+                itemBuilder: (context, index) {
+                  final message = _messages[index];
+                  final isMe = message['sender_id'] == widget.currentUserId;
+                  return _buildMessageItem(isMe, message);
+                },
+              ),
             ),
           ),
           SafeArea(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+              decoration: BoxDecoration(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
+              ),
               child: Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _textController,
-                      minLines: 1, maxLines: 5,
-                      decoration: InputDecoration(
-                        hintText: '发送消息...',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: TextField(
+                        controller: _textController,
+                        minLines: 1, maxLines: 5,
+                        decoration: const InputDecoration(
+                          hintText: '发送消息...',
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 10),
+                        ),
                       ),
                     ),
                   ),
@@ -441,13 +488,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     if (type == 'image' && mediaUrl != null) {
       contentWidget = GestureDetector(
         onTap: () => _viewMedia(mediaUrl),
-        child: Hero(tag: mediaUrl, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 200, maxHeight: 300), child: Image.network(mediaUrl, fit: BoxFit.cover, loadingBuilder: (ctx, child, loading) => loading == null ? child : Container(width: 150, height: 150, color: Colors.grey[200], child: const Center(child: CircularProgressIndicator())))))),
+        // 固定宽高，防止抖动
+        child: Hero(tag: mediaUrl, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: SizedBox(width: 200, height: 250, child: Image.network(mediaUrl, fit: BoxFit.cover, loadingBuilder: (ctx, child, loading) => loading == null ? child : Container(color: Colors.grey[200], child: const Center(child: CircularProgressIndicator())))))),
       );
     } else if (type == 'video' && mediaUrl != null) {
-      // 👇👇👇 核心修改：使用 VideoMessageBubble 显示封面 👇👇👇
       contentWidget = GestureDetector(
         onTap: () => _viewMedia(mediaUrl),
-        child: VideoMessageBubble(videoUrl: mediaUrl), // 使用自定义组件
+        child: SizedBox(width: 200, height: 250, child: VideoMessageBubble(videoUrl: mediaUrl)),
       );
     } else {
       contentWidget = Container(
@@ -484,78 +531,45 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   }
 }
 
-// ==========================================
-// 3. 【核心新增】视频气泡组件 (加载第一帧封面)
-// ==========================================
+// VideoMessageBubble (保持不变)
 class VideoMessageBubble extends StatefulWidget {
   final String videoUrl;
   const VideoMessageBubble({super.key, required this.videoUrl});
-
   @override
   State<VideoMessageBubble> createState() => _VideoMessageBubbleState();
 }
-
 class _VideoMessageBubbleState extends State<VideoMessageBubble> {
   VideoPlayerController? _controller;
   bool _isInitialized = false;
-
   @override
   void initState() {
     super.initState();
     _initializeVideo();
   }
-
   Future<void> _initializeVideo() async {
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
     try {
       await _controller!.initialize();
-      if (mounted) {
-        setState(() { _isInitialized = true; });
-      }
-    } catch (e) {
-      // 初始化失败，显示黑底
-    }
+      if (mounted) setState(() { _isInitialized = true; });
+    } catch (e) {}
   }
-
   @override
   void dispose() {
     _controller?.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        width: 200,
-        height: 250,
-        color: Colors.black,
+        width: 200, height: 250, color: Colors.black,
         child: Stack(
           alignment: Alignment.center,
           children: [
             if (_isInitialized && _controller != null)
-            // 显示第一帧 (FittedBox cover 模式)
-              SizedBox.expand(
-                child: FittedBox(
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    width: _controller!.value.size.width,
-                    height: _controller!.value.size.height,
-                    child: VideoPlayer(_controller!),
-                  ),
-                ),
-              ),
-
-            // 播放按钮遮罩
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.3),
-                shape: BoxShape.circle,
-              ),
-              padding: const EdgeInsets.all(12),
-              child: const Icon(Icons.play_arrow, color: Colors.white, size: 40),
-            ),
+              SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: _controller!.value.size.width, height: _controller!.value.size.height, child: VideoPlayer(_controller!)))),
+            Container(decoration: BoxDecoration(color: Colors.black.withOpacity(0.3), shape: BoxShape.circle), padding: const EdgeInsets.all(12), child: const Icon(Icons.play_arrow, color: Colors.white, size: 40)),
           ],
         ),
       ),

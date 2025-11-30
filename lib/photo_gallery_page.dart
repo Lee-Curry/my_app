@@ -198,26 +198,33 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
     }
   }
 
+  // 【核心修改】混合选择图片和视频上传
   Future<void> _uploadMedia() async {
     final picker = ImagePicker();
+
+    // 👇👇👇 关键：使用 pickMedia()，它允许用户在同一个界面选择图片或视频
     final XFile? pickedFile = await picker.pickMedia();
 
-    if (pickedFile == null) return;
+    if (pickedFile == null) return; // 用户取消了
 
     final File file = File(pickedFile.path);
+
+    // 👇👇👇 关键：自动识别用户选的是图片还是视频
     final String? mimeType = lookupMimeType(file.path);
-    final String mediaType = mimeType?.startsWith('image/') ?? false ? 'image' : 'video';
 
-    // 上传前简单Loading提示
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在上传...')));
+    // 如果 mimeType 是 'video/mp4' 等，就是视频；否则当作图片处理
+    final String mediaType = (mimeType != null && mimeType.startsWith('video/')) ? 'video' : 'image';
 
-    var request = http.MultipartRequest('POST', Uri.parse('$_apiUrl/api/gallery/upload')); // 这里的接口地址如果后端统一了可以用 messages/upload 那个，或者保留原来的
+    // UI 反馈
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('正在上传${mediaType == 'video' ? '视频' : '图片'}...')));
 
-    request.fields['userId'] = widget.userId.toString(); // 兼容旧接口
-    // 如果你统一了后端，可能需要传 senderId 等，这里假设你保留了旧上传接口或者做了兼容
-    request.fields['mediaType'] = mediaType;
+    // 构造请求
+    var request = http.MultipartRequest('POST', Uri.parse('$_apiUrl/api/gallery/upload'));
+    request.fields['userId'] = widget.userId.toString();
+    request.fields['mediaType'] = mediaType; // 告诉后端这是什么类型
+
     request.files.add(await http.MultipartFile.fromPath(
-      'media', // 注意：旧接口可能是 'media'，新聊天接口是 'file'，请确认后端 multer 配置
+      'media', // 后端接收的字段名
       file.path,
       contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
     ));
@@ -226,11 +233,13 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
-      if (mounted && (response.statusCode == 201 || response.statusCode == 200)) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('上传成功！')));
-        _fetchGallery(); // 刷新列表
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传失败: ${response.body}')));
+      if (mounted) {
+        if (response.statusCode == 201 || response.statusCode == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('上传成功！')));
+          _fetchGallery(); // 刷新列表
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传失败: ${response.body}')));
+        }
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传出错: $e')));

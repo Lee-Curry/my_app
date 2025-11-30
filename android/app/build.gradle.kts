@@ -8,7 +8,9 @@ plugins {
 android {
     namespace = "com.myapp.my_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // 【👇 重点是加这一行】直接复制下面的版本号，和你文件夹名字一模一样
+    ndkVersion = "27.0.12077973"
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

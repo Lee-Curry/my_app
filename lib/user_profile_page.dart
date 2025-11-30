@@ -1,17 +1,18 @@
-// === user_profile_page.dart (UI重构 & 深色模式适配版) ===
+// === user_profile_page.dart (支持备注显示与设置版) ===
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'private_chat_page.dart';
 import 'photo_gallery_page.dart';
+import 'set_remark_page.dart'; // 👈 导入新页面
 
 class UserProfilePage extends StatefulWidget {
   final int currentUserId; // 我
   final int targetUserId;  // 对方
-  final String nickname;
+  final String nickname;   // 原始昵称
   final String avatarUrl;
   final String introduction;
-  final String myAvatarUrl; // 传给聊天页用
+  final String myAvatarUrl;
 
   const UserProfilePage({
     super.key,
@@ -28,43 +29,55 @@ class UserProfilePage extends StatefulWidget {
 }
 
 class _UserProfilePageState extends State<UserProfilePage> {
-  // 简单的预览照片列表
   List<String> _previewPhotos = [];
-  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换IP
+  String? _remark; // 👈 新增：存储备注
+  final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
     _fetchPreviewPhotos();
+    _fetchRemark(); // 👈 获取备注
   }
 
-  // 预取几张照片用于展示在资料页
+  // 获取备注
+  Future<void> _fetchRemark() async {
+    try {
+      final res = await http.get(Uri.parse('$_apiUrl/api/friends/remark?myUserId=${widget.currentUserId}&friendUserId=${widget.targetUserId}'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() {
+          _remark = data['data']; // 如果没备注返回 null
+        });
+      }
+    } catch (e) {}
+  }
+
   Future<void> _fetchPreviewPhotos() async {
     try {
       final res = await http.get(Uri.parse('$_apiUrl/api/photos/user/${widget.targetUserId}?currentUserId=${widget.currentUserId}'));
       if (res.statusCode == 200) {
         final List data = jsonDecode(res.body)['data'];
-        // 只取前4张图片做预览
         setState(() {
           _previewPhotos = data
-              .where((item) => item['media_type'] == 'image' || item['media_type'] == null) // 只要图片
+              .where((item) => item['media_type'] == 'image' || item['media_type'] == null)
               .take(4)
               .map<String>((item) => item['url'] ?? item['media_url'])
               .toList();
         });
       }
-    } catch (e) {
-      // 忽略错误，预览加载失败不影响主功能
-    }
+    } catch (e) {}
   }
 
   @override
   Widget build(BuildContext context) {
-    // 获取当前主题亮度，用于手动微调颜色
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
     final subTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
+    // 👇 决定显示的主标题（有备注显备注，无备注显昵称）
+    final String displayName = (_remark != null && _remark!.isNotEmpty) ? _remark! : widget.nickname;
 
     return Scaffold(
       appBar: AppBar(
@@ -89,7 +102,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
               ),
               child: Row(
                 children: [
-                  // 头像
                   Container(
                     decoration: BoxDecoration(
                       border: Border.all(color: Theme.of(context).dividerColor, width: 1),
@@ -97,24 +109,27 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(11),
-                      child: Image.network(
-                        widget.avatarUrl,
-                        width: 70, height: 70,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(width: 70, height: 70, color: Colors.grey),
-                      ),
+                      child: Image.network(widget.avatarUrl, width: 70, height: 70, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width:70,height:70,color:Colors.grey)),
                     ),
                   ),
                   const SizedBox(width: 20),
-                  // 名字和简介
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // 主标题
                         Text(
-                          widget.nickname,
+                          displayName,
                           style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textColor),
                         ),
+
+                        // 👇 如果有备注，下面显示真实昵称
+                        if (_remark != null && _remark!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text("昵称: ${widget.nickname}", style: TextStyle(fontSize: 14, color: subTextColor)),
+                          ),
+
                         const SizedBox(height: 8),
                         Text(
                           widget.introduction.isEmpty ? "暂无简介" : widget.introduction,
@@ -131,25 +146,15 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
             const SizedBox(height: 20),
 
-            // 2. 照片墙入口 (带预览)
+            // 2. 照片墙入口
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(16),
-              ),
+              decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16)),
               child: InkWell(
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => PhotoGalleryPage(
-                        userId: widget.targetUserId,
-                        viewerId: widget.currentUserId,
-                        isMe: widget.targetUserId == widget.currentUserId,
-                      ),
-                    ),
-                  );
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => PhotoGalleryPage(
+                    userId: widget.targetUserId, viewerId: widget.currentUserId, isMe: widget.targetUserId == widget.currentUserId,
+                  )));
                 },
                 borderRadius: BorderRadius.circular(16),
                 child: Padding(
@@ -165,7 +170,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      // 预览缩略图区域
                       if (_previewPhotos.isNotEmpty)
                         SizedBox(
                           height: 60,
@@ -173,12 +177,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             children: _previewPhotos.map((url) {
                               return Container(
                                 margin: const EdgeInsets.only(right: 10),
-                                width: 60,
-                                height: 60,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8),
-                                  image: DecorationImage(image: NetworkImage(url), fit: BoxFit.cover),
-                                ),
+                                width: 60, height: 60,
+                                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), image: DecorationImage(image: NetworkImage(url), fit: BoxFit.cover)),
                               );
                             }).toList(),
                           ),
@@ -193,21 +193,44 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
             const SizedBox(height: 20),
 
-            // 3. 更多设置/信息 (可选，为了让页面丰满一点)
+            // 3. 设置备注入口
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
               decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16)),
               child: Column(
                 children: [
-                  _buildSettingsItem(context, "设置备注和标签", showDivider: true),
-                  _buildSettingsItem(context, "更多信息", showDivider: false),
+                  _buildSettingsItem(
+                      context,
+                      "设置备注和标签",
+                      showDivider: true,
+                      // 👇 点击跳转设置页
+                      onTap: () async {
+                        final newRemark = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => SetRemarkPage(
+                              myUserId: widget.currentUserId,
+                              friendUserId: widget.targetUserId,
+                              originalNickname: widget.nickname,
+                              initialRemark: _remark,
+                            ),
+                          ),
+                        );
+                        // 如果返回了新备注，刷新 UI
+                        if (newRemark != null) {
+                          setState(() {
+                            _remark = newRemark.toString().isEmpty ? null : newRemark;
+                          });
+                        }
+                      }
+                  ),
+                  _buildSettingsItem(context, "更多信息", showDivider: false, onTap: (){}),
                 ],
               ),
             ),
 
             const SizedBox(height: 40),
 
-            // 4. 发消息按钮
             if (widget.targetUserId != widget.currentUserId)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -224,7 +247,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
                           builder: (context) => PrivateChatPage(
                             currentUserId: widget.currentUserId,
                             otherUserId: widget.targetUserId,
-                            otherUserNickname: widget.nickname,
+                            // 👇 传给聊天页的名字，优先用备注
+                            otherUserNickname: displayName,
                             otherUserAvatar: widget.avatarUrl,
                             currentUserAvatar: widget.myAvatarUrl,
                           ),
@@ -248,17 +272,14 @@ class _UserProfilePageState extends State<UserProfilePage> {
     );
   }
 
-  Widget _buildSettingsItem(BuildContext context, String title, {bool showDivider = true}) {
+  Widget _buildSettingsItem(BuildContext context, String title, {bool showDivider = true, required VoidCallback onTap}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       children: [
         ListTile(
           title: Text(title, style: TextStyle(fontSize: 15, color: isDark ? Colors.white : Colors.black87)),
           trailing: Icon(Icons.arrow_forward_ios, size: 14, color: isDark ? Colors.grey[400] : Colors.grey[300]),
-          onTap: () {
-            // 待开发功能
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("功能开发中...")));
-          },
+          onTap: onTap,
         ),
         if (showDivider)
           Divider(height: 1, indent: 16, endIndent: 16, color: Theme.of(context).dividerColor.withOpacity(0.1)),
