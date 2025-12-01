@@ -1,5 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 👇👇👇 请复制以下权限代码 👇👇👇 -->
+    <!-- 网络权限 (你之前应该有) -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 旧版 Android 存储权限 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+
+    <!-- Android 13+ (API 33) 必须添加这三个具体的媒体权限 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+
+    <!-- 相机权限 (拍照用) -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- 👆👆👆 复制结束 👆👆👆 -->
+
     <application
         android:usesCleartextTraffic="true"
         android:label="晗伴"

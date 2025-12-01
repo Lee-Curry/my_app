@@ -32,7 +32,11 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   }
 
   Future<void> _createGroup() async {
-    if (_selectedIds.isEmpty) return;
+    // 👇👇👇 修改这里：至少选择 2 个好友 (加上你自己就是 3 人) 👇👇👇
+    if (_selectedIds.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('群聊至少需要3人（含你自己）')));
+      return;
+    }
 
     final nameController = TextEditingController();
     // 弹窗输入群名
