@@ -58,6 +58,8 @@ class _GroupAddMemberPageState extends State<GroupAddMemberPage> {
           body: jsonEncode({
             'groupId': widget.groupId,
             'memberIds': _selectedIds.toList(),
+            // 👇👇👇 新增这一行：告诉后端是谁发起的邀请 👇👇👇
+            'operatorId': widget.currentUserId,
           })
       );
 
