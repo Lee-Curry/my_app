@@ -16,6 +16,7 @@ import 'set_password_page.dart'; // 2. 【新增】导入新页面
 import 'conversations_list_page.dart'; // 1. 【新增】导入新页面
 import 'web_socket_service.dart';
 import 'contacts_page.dart'; // 👈 新增导入
+import 'avatar_viewer_page.dart'; // 👈 记得加这行
 
 // --- 新的数据模型 (UserProfileData) ---
 // 在 main.dart 的顶部
@@ -770,7 +771,28 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(radius: 40, backgroundImage: NetworkImage(_profileData!.avatarUrl)),
+                // 👇👇👇 修改这里：包裹 GestureDetector 并添加 Hero 动画 👇👇👇
+                GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => AvatarViewerPage(
+                          imageUrl: _profileData!.avatarUrl,
+                          heroTag: 'my_avatar', // 唯一的动画标签
+                        ),
+                      ),
+                    );
+                  },
+                  child: Hero(
+                    tag: 'my_avatar', // 必须和上面一致
+                    child: CircleAvatar(
+                      radius: 40,
+                      backgroundImage: NetworkImage(_profileData!.avatarUrl),
+                    ),
+                  ),
+                ),
+                // 👆👆👆 修改结束 👆👆👆
                 const SizedBox(width: 20),
                 Expanded(
                   child: Column(

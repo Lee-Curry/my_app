@@ -1,13 +1,16 @@
-// === conversations_list_page.dart (带好友申请红点版 - 完整代码) ===
+// === conversations_list_page.dart (群聊+私聊 完美显示版) ===
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:my_app/wechat_group_avatar.dart';
 import 'private_chat_page.dart';
+import 'group_chat_page.dart'; // 👈 必须导入群聊页面
 import 'users_list_page.dart';
 import 'friend_requests_page.dart';
 import 'web_socket_service.dart';
+import 'create_group_page.dart';
 
 class ConversationsListPage extends StatefulWidget {
   final int currentUserId;
@@ -27,15 +30,14 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
   bool _isLoading = true;
   String _myAvatarUrl = '';
 
-  // 1. 【新增】用来存好友申请的数量
   int _friendRequestCount = 0;
-
-  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换你的IP
+  // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
-    _refreshAllData(); // 统一加载数据
+    _refreshAllData();
     WebSocketService().newMessageNotifier.addListener(_onNewMessageReceived);
   }
 
@@ -51,16 +53,14 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
     }
   }
 
-  // 封装一个刷新所有数据的方法
   Future<void> _refreshAllData() async {
     await Future.wait([
       _fetchConversations(),
-      _fetchFriendRequestCount(), // 2. 【新增】每次刷新也获取好友申请数
+      _fetchFriendRequestCount(),
       if (_myAvatarUrl.isEmpty) _fetchMyAvatar(),
     ]);
   }
 
-  // 3. 【新增】获取好友申请数量的函数
   Future<void> _fetchFriendRequestCount() async {
     try {
       final response = await http.get(Uri.parse('$_apiUrl/api/friends/requests/count?userId=${widget.currentUserId}'));
@@ -71,7 +71,7 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
         });
       }
     } catch (e) {
-      print("获取好友申请数失败: $e");
+      // ignore
     }
   }
 
@@ -93,11 +93,10 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
 
         setState(() {
           _conversations = conversations;
+          _isLoading = false;
         });
       }
     } catch (e) {
-      // error
-    } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
   }
@@ -111,9 +110,7 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
           _myAvatarUrl = data['avatar_url'] ?? '';
         });
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
 
   String _formatTimestamp(dynamic isoTime) {
@@ -137,74 +134,67 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
       appBar: AppBar(
         title: const Text('消息'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add_alt_1),
-            tooltip: '发现好友',
-            onPressed: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => UsersListPage(currentUserId: widget.currentUserId),
-                ),
-              );
-              _refreshAllData();
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.add_circle_outline, size: 28),
+            offset: const Offset(0, 50),
+            onSelected: (value) {
+              if (value == 'group') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => CreateGroupPage(currentUserId: widget.currentUserId)),
+                ).then((_) => _fetchConversations());
+              } else if (value == 'add_friend') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => UsersListPage(currentUserId: widget.currentUserId)),
+                ).then((_) => _fetchConversations());
+              }
             },
-          )
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'group',
+                child: Row(children: [Icon(Icons.chat_bubble_outline), SizedBox(width: 10), Text('发起群聊')]),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem<String>(
+                value: 'add_friend',
+                child: Row(children: [Icon(Icons.person_add_alt_1), SizedBox(width: 10), Text('添加朋友')]),
+              ),
+            ],
+          ),
+          const SizedBox(width: 10),
         ],
       ),
       body: Column(
         children: [
-          // === 新朋友入口 (带红点) ===
+          // 新朋友入口
           InkWell(
             onTap: () async {
-              // 点击跳转到申请列表
-              await Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => FriendRequestsPage(currentUserId: widget.currentUserId))
-              );
-              // 返回时刷新一下，因为可能处理了申请，红点数量要变
+              await Navigator.push(context, MaterialPageRoute(builder: (context) => FriendRequestsPage(currentUserId: widget.currentUserId)));
               _refreshAllData();
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5))),
-              ),
+              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.5)))),
               child: Row(
                 children: [
-                  // 4. 【核心修改】这里使用 Stack 来叠加红点
                   Stack(
-                    clipBehavior: Clip.none, // 允许红点超出图标范围
+                    clipBehavior: Clip.none,
                     children: [
-                      Container(
-                        width: 50, height: 50,
-                        decoration: BoxDecoration(color: Colors.orange[400], borderRadius: BorderRadius.circular(12)),
-                        child: const Icon(Icons.person_add, color: Colors.white, size: 28),
-                      ),
-
-                      // 如果有申请，显示红点
+                      Container(width: 50, height: 50, decoration: BoxDecoration(color: Colors.orange[400], borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.person_add, color: Colors.white, size: 28)),
                       if (_friendRequestCount > 0)
                         Positioned(
-                          top: -5,
-                          right: -5,
+                          top: -5, right: -5,
                           child: Container(
                             padding: const EdgeInsets.all(5),
-                            decoration: BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2), // 白色描边，增强立体感
-                            ),
+                            decoration: BoxDecoration(color: Colors.red, shape: BoxShape.circle, border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)),
                             constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
                             alignment: Alignment.center,
-                            child: Text(
-                              _friendRequestCount > 99 ? '99+' : _friendRequestCount.toString(),
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                            ),
+                            child: Text(_friendRequestCount > 99 ? '99+' : _friendRequestCount.toString(), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                           ),
                         ),
                     ],
                   ),
-
                   const SizedBox(width: 15),
                   const Text("新朋友", style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                   const Spacer(),
@@ -214,38 +204,66 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
             ),
           ),
 
-          // === 对话列表 (保持不变) ===
+          // 会话列表
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : RefreshIndicator(
-              onRefresh: _refreshAllData, // 下拉刷新时，也会刷新好友红点
+              onRefresh: _refreshAllData,
               child: _conversations.isEmpty
                   ? Center(child: Text('暂无聊天消息', style: TextStyle(color: Colors.grey[600])))
                   : ListView.builder(
                 itemCount: _conversations.length,
                 itemBuilder: (context, index) {
                   final convo = _conversations[index];
-                  if (convo == null || !(convo is Map)) return Container();
 
-                  final int otherUserId = int.tryParse(convo['otherUserId']?.toString() ?? '-1') ?? -1;
-                  if (otherUserId == -1) return Container();
+                  // 1. 【核心解析】区分群聊和私聊
+                  final String type = convo['type'] ?? 'private'; // 'private' or 'group'
+                  final String name = convo['name'] ?? '未知';
+                  final String avatar = convo['avatar'] ?? '';
+                  final int targetId = convo['otherUserId']; // 这里的 otherUserId 在群聊时就是 groupId
 
-                  final String otherUserNickname = convo['otherUserNickname']?.toString() ?? '未知用户';
-                  final String otherUserAvatar = convo['otherUserAvatar']?.toString() ?? '';
-                  final String lastMessageContent = convo['lastMessageContent']?.toString() ?? '...';
+                  // 2. 解析最后一条消息内容
+                  String lastMsg = convo['lastMessageContent'] ?? '';
+                  final String msgType = convo['lastMessageType'] ?? 'text';
+                  if (msgType == 'image') lastMsg = '[图片]';
+                  else if (msgType == 'video') lastMsg = '[视频]';
+                  else if (msgType == 'recalled') lastMsg = '撤回了一条消息';
+
+                  // 群聊默认文案
+                  if (lastMsg.isEmpty && type == 'group') lastMsg = '群聊已创建';
+
                   final int unreadCount = int.tryParse(convo['unreadCount']?.toString() ?? '0') ?? 0;
+
+                  // 1. 解析群头像 URL 字符串
+                  List<String> groupAvatars = [];
+                  if (type == 'group') {
+                    final String urlsStr = convo['groupAvatarUrls'] ?? '';
+                    if (urlsStr.isNotEmpty) {
+                      groupAvatars = urlsStr.split(',');
+                    }
+                  }
 
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        CircleAvatar(
+                        // 3. 【核心修改】头像展示逻辑
+                        type == 'group'
+                            ? ClipRRect(
+                          borderRadius: BorderRadius.circular(4), // 微信群头像是圆角矩形
+                          child: WeChatGroupAvatar(
+                              avatars: groupAvatars,
+                              size: 50
+                          ),
+                        )
+                            : CircleAvatar( // 私聊还是圆形头像
                           radius: 25,
-                          backgroundImage: NetworkImage(otherUserAvatar),
-                          onBackgroundImageError: (_, __) {},
+                          backgroundImage: NetworkImage(avatar),
+                          backgroundColor: Colors.grey[200],
                         ),
+
                         if (unreadCount > 0)
                           Positioned(
                             top: -2, right: -2,
@@ -254,18 +272,15 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
                               decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
                               constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                               alignment: Alignment.center,
-                              child: Text(
-                                unreadCount > 99 ? '99+' : unreadCount.toString(),
-                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
+                              child: Text(unreadCount > 99 ? '99+' : unreadCount.toString(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                             ),
                           ),
                       ],
                     ),
-                    title: Text(otherUserNickname, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Padding(
                       padding: const EdgeInsets.only(top: 4.0),
-                      child: Text(lastMessageContent, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey[600])),
+                      child: Text(lastMsg, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey[600])),
                     ),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -275,19 +290,36 @@ class _ConversationsListPageState extends State<ConversationsListPage> {
                       ],
                     ),
                     onTap: () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => PrivateChatPage(
-                            currentUserId: widget.currentUserId,
-                            otherUserId: otherUserId,
-                            otherUserNickname: otherUserNickname,
-                            otherUserAvatar: otherUserAvatar,
-                            currentUserAvatar: _myAvatarUrl,
+                      // 4. 【核心跳转】根据类型跳不同页面
+                      if (type == 'group') {
+                        // 跳转群聊
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GroupChatPage(
+                              currentUserId: widget.currentUserId,
+                              groupId: targetId, // 群聊时 otherUserId 就是 groupId
+                              groupName: name,
+                              currentUserAvatar: _myAvatarUrl,
+                            ),
                           ),
-                        ),
-                      );
-                      _refreshAllData();
+                        );
+                      } else {
+                        // 跳转私聊
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => PrivateChatPage(
+                              currentUserId: widget.currentUserId,
+                              otherUserId: targetId,
+                              otherUserNickname: name,
+                              otherUserAvatar: avatar,
+                              currentUserAvatar: _myAvatarUrl,
+                            ),
+                          ),
+                        );
+                      }
+                      _refreshAllData(); // 返回后刷新列表
                     },
                   );
                 },
