@@ -1,18 +1,21 @@
-// === photo_gallery_page.dart (视频封面修复版 - 完整代码) ===
+// === photo_gallery_page.dart (小红书瀑布流 + 消息通知 + 兼容旧代码版) ===
 
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:video_player/video_player.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:mime/mime.dart';
-import 'package:http_parser/http_parser.dart';
-import 'media_viewer_page.dart'; // 导入大图/视频查看器
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart'; // 👈 必须引入这个来实现瀑布流
 
-import 'web_socket_service.dart'; // 导入 ws
-import 'notification_page.dart'; // 导入新页面
-// 数据模型
+import 'web_socket_service.dart';
+import 'notification_page.dart';
+import 'create_post_page.dart'; // 导入发布页
+import 'post_detail_page.dart'; // 导入详情页
+
+// ==========================================
+// 1. 保留这些类，防止 private_chat_page 报错
+// ==========================================
+
 class MediaItem {
   final int id;
   final String mediaUrl;
@@ -42,8 +45,8 @@ class MediaItem {
   }
 }
 
-// 【核心修改】视频缩略图组件 (代替原来的 VideoPlayerWidget)
-// 【核心修正】视频缩略图组件 (带裁剪功能，防止溢出)
+// 【核心修正】增强版视频缩略图组件
+// 【核心修正】视频缩略图组件 (修复 Layout 报错 + 黑屏问题)
 class GalleryVideoThumbnail extends StatefulWidget {
   final String videoUrl;
   const GalleryVideoThumbnail({super.key, required this.videoUrl});
@@ -59,15 +62,26 @@ class _GalleryVideoThumbnailState extends State<GalleryVideoThumbnail> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (mounted) {
-          setState(() {
-            _isInitialized = true;
-          });
-        }
-      })
-      ..setVolume(0);
+    _initializeVideo();
+  }
+
+  Future<void> _initializeVideo() async {
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
+    try {
+      await _controller!.initialize();
+      _controller!.setVolume(0); // 静音
+
+      // 👇 核心：往后跳 100ms 截取第一帧，防止黑屏
+      await _controller!.seekTo(const Duration(milliseconds: 100));
+
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      debugPrint("视频加载失败: $e");
+    }
   }
 
   @override
@@ -78,28 +92,27 @@ class _GalleryVideoThumbnailState extends State<GalleryVideoThumbnail> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black,
-      // 👇👇👇 关键修改：加上 ClipRect，强制裁剪超出格子的内容 👇👇👇
-      child: ClipRect(
+    // 1. 计算宽高比：如果视频加载好了用视频的，没加载好默认 1.0 (正方形)
+    // 这一步彻底解决了 'hasSize' 报错，因为它给了组件一个明确的高度
+    final double aspectRatio = (_isInitialized && _controller != null)
+        ? _controller!.value.aspectRatio
+        : 1.0;
+
+    return AspectRatio(
+      aspectRatio: aspectRatio,
+      child: Container(
+        color: Colors.black,
         child: Stack(
           alignment: Alignment.center,
           children: [
+            // 2. 视频画面
             if (_isInitialized && _controller != null)
-              SizedBox.expand( // 强迫子组件填满父容器（格子）
-                child: FittedBox(
-                  // BoxFit.cover 保证画面填满正方形，多余的会被 ClipRect 剪掉
-                  fit: BoxFit.cover,
-                  child: SizedBox(
-                    // 这里必须指定视频的原始宽高，FittedBox 才能正确计算比例
-                    width: _controller!.value.size.width,
-                    height: _controller!.value.size.height,
-                    child: VideoPlayer(_controller!),
-                  ),
-                ),
-              ),
+              VideoPlayer(_controller!)
+            else
+            // 加载中显示转圈，而不是纯黑，体验更好
+              const Center(child: CircularProgressIndicator(color: Colors.white30, strokeWidth: 2)),
 
-            // 播放图标
+            // 3. 播放图标遮罩
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -115,7 +128,10 @@ class _GalleryVideoThumbnailState extends State<GalleryVideoThumbnail> {
   }
 }
 
-// 照片墙主页面
+// ==========================================
+// 2. 照片墙主页面 (升级为瀑布流 + 帖子模式)
+// ==========================================
+
 class PhotoGalleryPage extends StatefulWidget {
   final int userId;
   final int viewerId;
@@ -133,18 +149,17 @@ class PhotoGalleryPage extends StatefulWidget {
 }
 
 class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
-  List<MediaItem> _mediaItems = [];
+  List<dynamic> _posts = []; // 这里改存帖子数据
   bool _isLoading = true;
-  int _unreadCount = 0; // 🔔 新增：未读数
+  int _unreadCount = 0;
   final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
-    _fetchGallery();
-    _fetchUnreadCount(); // 获取初始未读数
+    _fetchPosts(); // 改为拉取帖子
+    _fetchUnreadCount();
 
-    // 监听 WebSocket
     WebSocketService().newMessageNotifier.addListener(_onWsNotification);
   }
 
@@ -154,11 +169,8 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
     super.dispose();
   }
 
-  // 监听 WS 事件
   void _onWsNotification() {
-    // 这里的逻辑需要 WebSocketService 支持 'notification' 类型
-    // 简单起见，只要有 WS 消息来，我们就刷新一下未读数
-    // 更好的做法是在 WebSocketService 里解析 type: notification
+    // 简单处理：有通知就刷新未读数
     _fetchUnreadCount();
   }
 
@@ -172,164 +184,186 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
     } catch(e){}
   }
 
-  Future<void> _fetchGallery() async {
+  // 👇👇👇 核心修改：改为调用 /api/posts/list 接口 👇👇👇
+  Future<void> _fetchPosts() async {
     if (!mounted) return;
     setState(() { _isLoading = true; });
 
     try {
-      final uri = Uri.parse('$_apiUrl/api/photos/user/${widget.userId}?currentUserId=${widget.viewerId}');
-      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      final uri = Uri.parse('$_apiUrl/api/posts/list?userId=${widget.userId}&viewerId=${widget.viewerId}');
+      final response = await http.get(uri);
 
       if (mounted && response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body)['data'];
+        final data = jsonDecode(response.body)['data'];
         setState(() {
-          _mediaItems = data.map((item) => MediaItem.fromJson(item)).toList();
+          _posts = data;
+          _isLoading = false;
         });
-      } else if (response.statusCode == 403) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('你们还不是好友，无法查看照片墙')));
-          setState(() => _mediaItems = []);
-        }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('加载失败: $e')));
-    } finally {
       if (mounted) setState(() { _isLoading = false; });
-    }
-  }
-
-  // 【核心修改】混合选择图片和视频上传
-  Future<void> _uploadMedia() async {
-    final picker = ImagePicker();
-
-    // 👇👇👇 关键：使用 pickMedia()，它允许用户在同一个界面选择图片或视频
-    final XFile? pickedFile = await picker.pickMedia();
-
-    if (pickedFile == null) return; // 用户取消了
-
-    final File file = File(pickedFile.path);
-
-    // 👇👇👇 关键：自动识别用户选的是图片还是视频
-    final String? mimeType = lookupMimeType(file.path);
-
-    // 如果 mimeType 是 'video/mp4' 等，就是视频；否则当作图片处理
-    final String mediaType = (mimeType != null && mimeType.startsWith('video/')) ? 'video' : 'image';
-
-    // UI 反馈
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('正在上传${mediaType == 'video' ? '视频' : '图片'}...')));
-
-    // 构造请求
-    var request = http.MultipartRequest('POST', Uri.parse('$_apiUrl/api/gallery/upload'));
-    request.fields['userId'] = widget.userId.toString();
-    request.fields['mediaType'] = mediaType; // 告诉后端这是什么类型
-
-    request.files.add(await http.MultipartFile.fromPath(
-      'media', // 后端接收的字段名
-      file.path,
-      contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
-    ));
-
-    try {
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-
-      if (mounted) {
-        if (response.statusCode == 201 || response.statusCode == 200) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('上传成功！')));
-          _fetchGallery(); // 刷新列表
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传失败: ${response.body}')));
-        }
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('上传出错: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.isMe ? '我的照片墙' : 'TA的照片墙'),
-      // 👇👇👇 新增：右上角消息入口 👇👇👇
-      actions: [
-        if (widget.isMe) // 只有看自己照片墙时才显示消息中心
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_none),
-                onPressed: () async {
-                  // 跳转消息页
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationPage(userId: widget.viewerId)));
-                  // 返回后清空红点
-                  _fetchUnreadCount();
-                },
-              ),
-              if (_unreadCount > 0)
-                Positioned(
-                  top: 10, right: 10,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                    child: Text("$_unreadCount", style: const TextStyle(color: Colors.white, fontSize: 10)),
-                  ),
-                )
-            ],
-          )
-      ],
+      appBar: AppBar(
+        title: Text(widget.isMe ? '我的笔记' : 'TA的笔记'), // 改个名字更贴切
+        actions: [
+          if (widget.isMe)
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_none),
+                  onPressed: () async {
+                    await Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationPage(userId: widget.viewerId)));
+                    _fetchUnreadCount();
+                  },
+                ),
+                if (_unreadCount > 0)
+                  Positioned(
+                    top: 10, right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                      child: Text("$_unreadCount", style: const TextStyle(color: Colors.white, fontSize: 10)),
+                    ),
+                  )
+              ],
+            )
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _mediaItems.isEmpty
+          : _posts.isEmpty
           ? Center(child: Text('暂无动态', style: TextStyle(color: Colors.grey[600])))
           : RefreshIndicator(
-        onRefresh: _fetchGallery,
-        child: GridView.builder(
-          padding: const EdgeInsets.all(4),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3, // 3列
-            crossAxisSpacing: 4,
-            mainAxisSpacing: 4,
+        onRefresh: _fetchPosts,
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          // 👇👇👇 核心修改：使用 MasonryGridView 实现瀑布流 👇👇👇
+          child: MasonryGridView.count(
+            crossAxisCount: 2, // 双列
+            mainAxisSpacing: 10, // 垂直间距
+            crossAxisSpacing: 10, // 水平间距
+            itemCount: _posts.length,
+            itemBuilder: (context, index) {
+              return _buildPostCard(_posts[index]);
+            },
           ),
-          itemCount: _mediaItems.length,
-          itemBuilder: (context, index) {
-            final item = _mediaItems[index];
-
-            return GestureDetector(
-                onTap: () {
-                  // 点击进入大图查看
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => MediaViewerPage(
-                        mediaItems: _mediaItems,
-                        initialIndex: index,
-                        viewerId: widget.viewerId,
-                        apiUrl: _apiUrl,
-                        // 照片墙模式：isPureView = false (显示点赞评论)
-                        isPureView: false,
-                      ),
-                    ),
-                  );
-                },
-                child: Hero(
-                  tag: 'photo_${item.id}', // Hero 动画
-                  child: item.mediaType == 'image'
-                  // 图片处理
-                      ? Image.network(item.mediaUrl, fit: BoxFit.cover)
-                  // 视频处理：使用新的缩略图组件
-                      : GalleryVideoThumbnail(videoUrl: item.mediaUrl),
-                )
-            );
-          },
         ),
       ),
+      // 👇👇👇 核心修改：点击跳转到 CreatePostPage 👇👇👇
       floatingActionButton: widget.isMe
           ? FloatingActionButton(
-        onPressed: _uploadMedia,
-        child: const Icon(Icons.add_a_photo),
+        onPressed: () async {
+          final needRefresh = await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => CreatePostPage(userId: widget.userId))
+          );
+          if (needRefresh == true) _fetchPosts();
+        },
+        child: const Icon(Icons.add),
       )
           : null,
+    );
+  }
+
+  // 单个瀑布流卡片组件
+  Widget _buildPostCard(dynamic post) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final String coverUrl = post['cover_url'] ?? '';
+    final String title = post['title'] ?? post['content'] ?? '';
+    final String nickname = post['nickname'] ?? '未知';
+    final String avatarUrl = post['avatar_url'] ?? '';
+    final int likeCount = post['like_count'] ?? 0;
+    bool isVideo = post['cover_type'] == 'video';
+    // 👇👇👇 核心修复：双重判断是否为视频 👇👇👇
+    // 2. 如果字段没对上，检查链接后缀 (兜底策略)
+    if (!isVideo && coverUrl.isNotEmpty) {
+      isVideo = coverUrl.toLowerCase().contains('.mp4') ||
+          coverUrl.toLowerCase().contains('.mov');
+    }
+    // 👆👆👆 修复结束 👆👆👆
+
+    return GestureDetector(
+      onTap: () {
+        // 跳转到新的帖子详情页
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailPage(
+          postId: post['id'],
+          viewerId: widget.viewerId,
+          apiUrl: _apiUrl,
+        )));
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: isDark ? [] : [BoxShadow(color: Colors.grey.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 2))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. 封面图 (修复视频显示)
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+              child: Stack(
+                children: [
+                  // 👇👇👇 核心修复：根据 isVideo 决定显示什么 👇👇👇
+                  isVideo
+                      ? GalleryVideoThumbnail(videoUrl: coverUrl) // 用缩略图组件
+                      : Image.network(
+                    coverUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => Container(
+                        height: 150,
+                        color: Colors.grey[200],
+                        child: const Icon(Icons.broken_image, color: Colors.grey)
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // 2. 内容区
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标题
+                  Text(
+                    title.isEmpty ? "分享图片" : title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black87
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 底部用户行
+                  Row(
+                    children: [
+                      CircleAvatar(radius: 8, backgroundImage: NetworkImage(avatarUrl)),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(nickname, style: const TextStyle(fontSize: 10, color: Colors.grey), overflow: TextOverflow.ellipsis),
+                      ),
+                      const Icon(Icons.favorite_border, size: 12, color: Colors.grey),
+                      const SizedBox(width: 2),
+                      Text("$likeCount", style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

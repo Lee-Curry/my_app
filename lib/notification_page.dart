@@ -1,6 +1,7 @@
 // === notification_page.dart (新建) ===
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:my_app/post_detail_page.dart';
 import 'dart:convert';
 import 'photo_gallery_page.dart';
 import 'media_viewer_page.dart';
@@ -60,15 +61,14 @@ class _NotificationPageState extends State<NotificationPage> {
       userAvatarUrl: "",
     );
 
+    // 👇👇👇 修改跳转目标 👇👇👇
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MediaViewerPage(
-          mediaItems: [item],
-          initialIndex: 0,
+        builder: (_) => PostDetailPage(
+          postId: note['photo_id'], // 这里的 photo_id 就是 post_id
           viewerId: widget.userId,
           apiUrl: _apiUrl,
-          isPureView: false, // 允许互动
         ),
       ),
     );
