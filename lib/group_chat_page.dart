@@ -116,10 +116,16 @@ class _GroupChatPageState extends State<GroupChatPage> with WidgetsBindingObserv
             _scrollToBottom();
           }
         }
+        // 👇👇👇 【核心新增】调用群聊标记已读接口 👇👇👇
+        // 只要拉取成功，说明我看过了，就告诉后端把红点消掉
+        if (_messages.isNotEmpty) {
+          _markGroupRead();
+        }
+        // 👆👆👆 新增结束 👆👆👆
       }
 
+
       if (isInitialLoad) {
-        await http.put(Uri.parse('$_apiUrl/api/messages/mark-read/$_conversationId/${widget.currentUserId}'));
         if (mounted) setState(() { _isLoading = false; });
       }
     } catch (e) {
@@ -127,10 +133,27 @@ class _GroupChatPageState extends State<GroupChatPage> with WidgetsBindingObserv
     }
   }
 
+  // 👇👇👇 新增：标记已读函数 👇👇👇
+  Future<void> _markGroupRead() async {
+    try {
+      await http.post(
+        Uri.parse('$_apiUrl/api/groups/mark-read'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': widget.currentUserId,
+          'groupId': widget.groupId,
+        }),
+      );
+      // 这里不需要 setState，因为这只影响外面的列表页红点
+    } catch (e) {
+      print("标记已读失败: $e");
+    }
+  }
+
   void _scrollToBottom({bool animated = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        final position = _scrollController.position.maxScrollExtent;
+        final position = 0.0;
         if (animated) {
           _scrollController.animateTo(
             position,
