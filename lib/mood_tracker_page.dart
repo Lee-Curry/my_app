@@ -187,7 +187,7 @@ class _MoodTrackerPageState extends State<MoodTrackerPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(children: [Icon(Icons.auto_awesome, color: Colors.amber), SizedBox(width: 8), Text("AI 暖心回信", style: TextStyle(fontWeight: FontWeight.bold))]),
+                          const Row(children: [Icon(Icons.auto_awesome, color: Colors.amber), SizedBox(width: 8), Text("晗宝 暖心回信", style: TextStyle(fontWeight: FontWeight.bold))]),
                           const SizedBox(height: 8),
                           Text(_currentAiResponse!, style: const TextStyle(height: 1.5)),
                         ],
@@ -280,7 +280,7 @@ class _MoodTrackerPageState extends State<MoodTrackerPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              "AI: ${item.aiResponse}",
+                              "晗宝: ${item.aiResponse}",
                               maxLines: 1, // AI 回复也只显示一行
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(fontSize: 12, color: Colors.grey[600], fontStyle: FontStyle.italic),

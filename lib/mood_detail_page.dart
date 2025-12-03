@@ -118,7 +118,7 @@ class MoodDetailPage extends StatelessWidget {
                 const Icon(Icons.auto_awesome, color: Colors.amber),
                 const SizedBox(width: 8),
                 Text(
-                  "AI 暖心回信",
+                  "晗宝 暖心回信",
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.amber[700]),
                 ),
               ],

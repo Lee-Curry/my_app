@@ -1,10 +1,13 @@
-// === create_post_page.dart (图文发布编辑器) ===
+// === create_post_page.dart (修复视频预览红叉版) ===
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:mime/mime.dart';
+import 'package:video_player/video_player.dart'; // 👈 必须导入
 
 class CreatePostPage extends StatefulWidget {
   final int userId;
@@ -17,34 +20,100 @@ class CreatePostPage extends StatefulWidget {
 class _CreatePostPageState extends State<CreatePostPage> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _contentController = TextEditingController();
+
   List<File> _selectedFiles = [];
   bool _isPublishing = false;
 
+  // ！！！！请务必替换为您自己的IP地址！！！！
   final String _apiUrl = 'http://192.168.23.18:3000';
 
-  // 选择媒体
-  Future<void> _pickMedia() async {
-    final List<AssetEntity>? result = await AssetPicker.pickAssets(
-      context,
-      pickerConfig: AssetPickerConfig(
-        maxAssets: 9 - _selectedFiles.length, // 剩余可选数量
-        requestType: RequestType.common,
-      ),
-    );
+  Future<void> _pickMedia({required bool isVideo, required bool isCamera}) async {
+    int maxCount = 9 - _selectedFiles.length;
+    if (maxCount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('最多只能传9个哦')));
+      return;
+    }
 
-    if (result != null) {
-      for (var asset in result) {
-        final File? file = await asset.file;
-        if (file != null) {
-          setState(() {
-            _selectedFiles.add(file);
-          });
+    if (isCamera) {
+      final picker = ImagePicker();
+      XFile? xFile;
+      if (isVideo) {
+        xFile = await picker.pickVideo(source: ImageSource.camera);
+      } else {
+        xFile = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+      }
+      if (xFile != null) {
+        setState(() { _selectedFiles.add(File(xFile!.path)); });
+      }
+    } else {
+      final RequestType requestType = isVideo ? RequestType.video : RequestType.common;
+      final List<AssetEntity>? result = await AssetPicker.pickAssets(
+        context,
+        pickerConfig: AssetPickerConfig(maxAssets: maxCount, requestType: requestType),
+      );
+      if (result != null) {
+        for (var asset in result) {
+          final File? file = await asset.file;
+          if (file != null) {
+            setState(() { _selectedFiles.add(file); });
+          }
         }
       }
     }
   }
 
-  // 发布逻辑
+  void _showMediaPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: 180,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildOptionItem(Icons.image, "相册", () {
+              Navigator.pop(ctx);
+              _pickMedia(isVideo: false, isCamera: false);
+            }),
+            _buildOptionItem(Icons.camera_alt, "拍摄", () {
+              Navigator.pop(ctx);
+              _pickMedia(isVideo: false, isCamera: true);
+            }),
+            _buildOptionItem(Icons.videocam, "视频", () {
+              Navigator.pop(ctx);
+              _pickMedia(isVideo: true, isCamera: false);
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionItem(IconData icon, String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(15)
+            ),
+            child: Icon(icon, size: 30, color: Colors.black87),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
   Future<void> _publish() async {
     if (_selectedFiles.isEmpty && _contentController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('总得写点什么或发张图吧~')));
@@ -60,11 +129,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
       request.fields['title'] = _titleController.text;
       request.fields['content'] = _contentController.text;
 
-      // 多文件添加
       for (var file in _selectedFiles) {
         final mimeType = lookupMimeType(file.path);
         request.files.add(await http.MultipartFile.fromPath(
-          'files', // 后端接收的字段名是 files (数组)
+          'files',
           file.path,
           contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
         ));
@@ -74,7 +142,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
 
       if (response.statusCode == 200) {
         if(mounted) {
-          Navigator.pop(context, true); // 返回 true 表示需刷新
+          Navigator.pop(context, true);
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发布成功！')));
         }
       } else {
@@ -123,12 +191,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. 媒体选择区 (九宫格)
             _buildMediaGrid(),
-
             const SizedBox(height: 20),
-
-            // 2. 标题输入
             TextField(
               controller: _titleController,
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black),
@@ -139,12 +203,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
               ),
             ),
             const Divider(),
-
-            // 3. 正文输入
             TextField(
               controller: _contentController,
               style: TextStyle(fontSize: 16, color: isDark ? Colors.white : Colors.black87),
-              maxLines: null, // 自动增高
+              maxLines: null,
               minLines: 5,
               decoration: InputDecoration(
                 hintText: "添加正文...",
@@ -162,7 +224,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _selectedFiles.length + 1, // +1 是加号按钮
+      itemCount: _selectedFiles.length + 1,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         mainAxisSpacing: 10,
@@ -171,9 +233,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
       ),
       itemBuilder: (context, index) {
         if (index == _selectedFiles.length) {
-          // 加号按钮
           return GestureDetector(
-            onTap: _pickMedia,
+            onTap: _showMediaPicker,
             child: Container(
               decoration: BoxDecoration(
                 color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.grey[100],
@@ -184,21 +245,30 @@ class _CreatePostPageState extends State<CreatePostPage> {
           );
         }
 
-        // 已选图片展示
         final file = _selectedFiles[index];
+        // 👇👇👇 核心逻辑：判断文件类型 👇👇👇
+        final mime = lookupMimeType(file.path);
+        final isVideo = mime != null && mime.startsWith('video/');
+
         return Stack(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.file(file, width: double.infinity, height: double.infinity, fit: BoxFit.cover),
+              child: SizedBox.expand(
+                child: isVideo
+                // 如果是视频，使用本地视频缩略图组件
+                    ? _LocalVideoThumbnail(file: file)
+                // 如果是图片，继续用 Image.file
+                    : Image.file(file, fit: BoxFit.cover),
+              ),
             ),
+
+            // 删除按钮
             Positioned(
               top: 4, right: 4,
               child: GestureDetector(
                 onTap: () {
-                  setState(() {
-                    _selectedFiles.removeAt(index);
-                  });
+                  setState(() { _selectedFiles.removeAt(index); });
                 },
                 child: Container(
                   padding: const EdgeInsets.all(2),
@@ -210,6 +280,64 @@ class _CreatePostPageState extends State<CreatePostPage> {
           ],
         );
       },
+    );
+  }
+}
+
+// 👇👇👇 【核心新增】本地视频缩略图组件 👇👇👇
+// 专门用于显示本地 File 视频的第一帧，带播放图标
+class _LocalVideoThumbnail extends StatefulWidget {
+  final File file;
+  const _LocalVideoThumbnail({required this.file});
+
+  @override
+  State<_LocalVideoThumbnail> createState() => _LocalVideoThumbnailState();
+}
+
+class _LocalVideoThumbnailState extends State<_LocalVideoThumbnail> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 使用 .file() 方法加载本地文件
+    _controller = VideoPlayerController.file(widget.file)
+      ..initialize().then((_) {
+        // 往后跳一点点，避开黑屏片头
+        _controller!.seekTo(const Duration(milliseconds: 100));
+        if (mounted) setState(() { _isInitialized = true; });
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          if (_isInitialized && _controller != null)
+            SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: _controller!.value.size.width,
+                  height: _controller!.value.size.height,
+                  child: VideoPlayer(_controller!),
+                ),
+              ),
+            ),
+          // 播放图标
+          const Icon(Icons.play_circle_outline, color: Colors.white, size: 40),
+        ],
+      ),
     );
   }
 }
