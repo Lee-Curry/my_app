@@ -1,6 +1,7 @@
 // 在 settings_page.dart 的顶部
 
 import 'package:flutter/material.dart';
+import 'package:my_app/privacy_policy_page.dart';
 import 'account_security_page.dart'; // 1. 【新增】导入我们刚刚创建的页面
 
 class SettingsPage extends StatefulWidget {
@@ -106,7 +107,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: const Text('隐私政策'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
-                  print('点击了隐私政策');
+                  // print('点击了隐私政策'); // 旧代码
+
+                  // --- 新代码开始 ---
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const PrivacyPolicyPage(),
+                    ),
+                  );
                 },
               ),
             ],
