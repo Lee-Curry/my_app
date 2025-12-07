@@ -61,13 +61,17 @@ class MoodDetailPage extends StatelessWidget {
               child: Column(
                 children: [
                   // 使用 Hero 动画，如果列表页也有 tag，跳转会很丝滑
-                  Hero(
-                    tag: 'mood_icon_${record.id}',
-                    child: Text(
-                      _getEmoji(record.moodType),
-                      style: const TextStyle(fontSize: 64),
-                    ),
+              Hero(
+              tag: 'mood_icon_${record.id}',
+                // 👇👇👇 修改开始：包裹 Material 👇👇👇
+                child: Material(
+                  color: Colors.transparent, // 设为透明
+                  child: Text(
+                    _getEmoji(record.moodType),
+                    style: const TextStyle(fontSize: 64),
                   ),
+                ),
+              ),
                   const SizedBox(height: 10),
                   Text(
                     record.moodType,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'mood_analysis_page.dart';
 import 'mood_detail_page.dart';
 import 'mood_service.dart';
 import 'mood_model.dart';
@@ -116,7 +117,26 @@ class _MoodTrackerPageState extends State<MoodTrackerPage> {
     final primaryColor = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
-      appBar: AppBar(title: const Text("心情日记")),
+      appBar: AppBar(
+        title: const Text("心情日记"),
+        actions: [
+          // 【新增】图表分析入口按钮
+          IconButton(
+            icon: const Icon(Icons.insights_rounded), // 一个类似报表的图标
+            tooltip: "心情分析",
+            onPressed: () {
+              // 跳转到分析页，并将当前已加载的 _historyList 传过去
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MoodAnalysisPage(records: _historyList),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8), // 稍微留点空隙
+        ],
+      ),
       body: Column(
         children: [
           // === 上半部分：输入区 ===
@@ -246,10 +266,18 @@ class _MoodTrackerPageState extends State<MoodTrackerPage> {
                                 // 添加 Hero 动画标签，和详情页对应
                                 Hero(
                                   tag: 'mood_icon_${item.id}',
-                                  child: Text(
-                                    _moodOptions[item.moodType] ?? "😐",
-                                    style: const TextStyle(fontSize: 24, decoration: TextDecoration.none), // 确保 Hero 动画没下划线
-                                  ),
+                                    // 👇👇👇 修改开始：包裹 Material 👇👇👇
+                                    child: Material(
+                                      color: Colors.transparent, // 必须设置透明，否则会有白色背景
+                                      child: Text(
+                                        _moodOptions[item.moodType] ?? "😐",
+                                        style: const TextStyle(
+                                          fontSize: 24,
+                                          // 这一行其实可以去掉了，因为有了 Material 就不需要强制去掉下划线了
+                                          // decoration: TextDecoration.none,
+                                        ),
+                                      ),
+                                    ),
                                 ),
                                 const SizedBox(width: 8),
                                 Text(item.moodType, style: const TextStyle(fontWeight: FontWeight.bold)),
