@@ -1,4 +1,4 @@
-// === private_chat_page.dart (神级布局：兼容长短对话 + 完美键盘) ===
+// === private_chat_page.dart (最终完美版：兼容布局 + 键盘 + 拉黑红点) ===
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -13,6 +13,53 @@ import 'user_profile_page.dart';
 import 'photo_gallery_page.dart';
 import 'media_viewer_page.dart';
 import 'web_socket_service.dart';
+
+// 1. 【新增】定义消息发送状态
+enum MessageSendStatus { sending, success, failed }
+
+// 2. 【新增】封装消息模型，方便管理状态
+class LocalMessage {
+  final int id;
+  final int senderId;
+  final int receiverId;
+  final String content;
+  final String type; // text, image, video, recalled
+  final String? mediaUrl;
+  final String createdAt;
+  MessageSendStatus status; // 状态字段
+
+  LocalMessage({
+    required this.id,
+    required this.senderId,
+    required this.receiverId,
+    required this.content,
+    required this.type,
+    this.mediaUrl,
+    required this.createdAt,
+    this.status = MessageSendStatus.success, // 默认都是成功的（历史消息）
+  });
+
+  // 工厂方法：从 JSON 解析
+  factory LocalMessage.fromJson(Map<String, dynamic> json) {
+    MessageSendStatus initialStatus = MessageSendStatus.success;
+
+    // 如果数据库里的 status 是 blocked，前端显示为 failed (红点)
+    if (json['status'] == 'blocked') {
+      initialStatus = MessageSendStatus.failed;
+    }
+
+    return LocalMessage(
+      id: json['id'],
+      senderId: json['sender_id'],
+      receiverId: json['receiver_id'],
+      content: json['content'] ?? '',
+      type: json['message_type'] ?? 'text',
+      mediaUrl: json['media_url'],
+      createdAt: json['created_at'] ?? '',
+      status: initialStatus,
+    );
+  }
+}
 
 class PrivateChatPage extends StatefulWidget {
   final int currentUserId;
@@ -38,7 +85,8 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
 
-  List<dynamic> _messages = [];
+  // 3. 【修改】列表类型改为 LocalMessage
+  List<LocalMessage> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
   bool _showSendButton = false;
@@ -51,7 +99,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   @override
   void initState() {
     super.initState();
-    // 不需要 WidgetsBindingObserver 了，reverse: true 原生支持键盘
     _initializeChat();
     _textController.addListener(() {
       setState(() { _showSendButton = _textController.text.trim().isNotEmpty; });
@@ -76,6 +123,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     await _fetchConversationId();
     if (_conversationId != null) {
       await _fetchMessages(isInitialLoad: true);
+      // 定时轮询兜底
       _timer = Timer.periodic(const Duration(seconds: 5), (timer) {
         if (mounted) _fetchMessages();
       });
@@ -100,22 +148,24 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       return;
     }
     try {
-      final response = await http.get(Uri.parse('$_apiUrl/api/messages/$_conversationId'));
+      // 👇👇👇 核心修改：在 URL 后面加上 ?userId=... 👇👇👇
+      final response = await http.get(
+          Uri.parse('$_apiUrl/api/messages/$_conversationId?userId=${widget.currentUserId}')
+      );
+      // 👆👆👆 修改结束 👆👆👆
+
       if (mounted && response.statusCode == 200) {
-        final data = json.decode(response.body)['data'];
+        final List data = json.decode(response.body)['data'];
 
-        // 1. 【核心】倒序排列 (最新消息在 Index 0)
-        final List newMessages = (data as List).reversed.toList();
+        final List<LocalMessage> serverMessages = data.map((e) => LocalMessage.fromJson(e)).toList().reversed.toList();
 
-        if (jsonEncode(_messages) != jsonEncode(newMessages)) {
-          setState(() { _messages = newMessages; });
+        setState(() {
+          // 只保留本地待发送的(ID很大的)消息
+          final pendingMsgs = _messages.where((m) => m.id > 10000000000).toList();
+          _messages = [...pendingMsgs, ...serverMessages];
+        });
 
-          // 如果收到新消息，平滑滚动到底部(0.0)
-          // 首次加载不需要滚，因为 reverse:true 默认就在底部
-          if (isWsTrigger) {
-            _scrollToBottom();
-          }
-        }
+        if (isWsTrigger) _scrollToBottom();
       }
 
       if (isInitialLoad) {
@@ -132,7 +182,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       if (_scrollController.hasClients) {
         if (animated) {
           _scrollController.animateTo(
-            0.0, // 倒序模式下，0.0 就是最底部
+            0.0,
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutQuad,
           );
@@ -143,29 +193,30 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     });
   }
 
-  // 2. 【核心】发送消息：乐观更新 + 秒滑到底
+  // 4. 【核心改造】发送消息：支持失败状态
+  // 修改 _sendMessage 方法
   Future<void> _sendMessage() async {
     if (!_showSendButton) return;
     final content = _textController.text.trim();
     _textController.clear();
     setState(() { _showSendButton = false; });
 
-    final tempMessage = {
-      'id': -1,
-      'sender_id': widget.currentUserId,
-      'receiver_id': widget.otherUserId,
-      'content': content,
-      'message_type': 'text',
-      'media_url': null,
-      'created_at': DateTime.now().toString(),
-    };
+    // 1. 创建本地临时消息
+    final tempId = DateTime.now().millisecondsSinceEpoch;
+    final tempMessage = LocalMessage(
+      id: tempId,
+      senderId: widget.currentUserId,
+      receiverId: widget.otherUserId,
+      content: content,
+      type: 'text',
+      createdAt: DateTime.now().toString(),
+      status: MessageSendStatus.sending, // 状态：发送中
+    );
 
-    // 插入到列表头 (即屏幕最下方)
     setState(() {
       _messages.insert(0, tempMessage);
     });
 
-    // 立即滚动到 0.0
     _scrollToBottom(animated: true);
 
     try {
@@ -178,13 +229,53 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           'content': content,
         }),
       );
-      if (mounted && response.statusCode == 201) {
-        await _fetchMessages();
+
+      final resBody = jsonDecode(response.body);
+
+      if (mounted) {
+        // 🌟 核心修改开始：不再进行 remove 和 fetch 操作 🌟
+
+        setState(() {
+          // 找到刚才那条临时消息
+          final index = _messages.indexWhere((m) => m.id == tempId);
+          if (index != -1) {
+            if (response.statusCode == 201 || (resBody['success'] == true)) {
+              // 情况 A: 发送成功 -> 变正常
+              _messages[index].status = MessageSendStatus.success;
+            }
+            else if (response.statusCode == 403 || resBody['saved'] == true) {
+              // 情况 B: 被拉黑 -> 变红点 (重点在这里)
+              // 我们直接修改本地这条消息的状态为 failed
+              // 绝对不要 remove 它，也绝对不要在这里 await _fetchMessages()
+              // 这样就不会闪烁了
+              _messages[index].status = MessageSendStatus.failed;
+
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text("消息已发出，但被对方拒收了"),
+                duration: Duration(seconds: 1),
+              ));
+            }
+            else {
+              // 情况 C: 其他错误 -> 变红点
+              _messages[index].status = MessageSendStatus.failed;
+            }
+          }
+        });
+        // 🌟 核心修改结束 🌟
       }
+
     } catch (e) {
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
+      if(mounted) {
+        setState(() {
+          final index = _messages.indexWhere((m) => m.id == tempId);
+          if (index != -1) _messages[index].status = MessageSendStatus.failed;
+        });
+      }
     }
   }
+
+  // ... 媒体发送部分暂时保持原样，也可以加上类似的状态逻辑 ...
+  // 为了简洁，这里暂不展开媒体发送的重试逻辑
 
   Future<bool> _confirmSendMultiMedia(List<XFile> files, {bool isVideo = false}) async {
     return await showDialog(
@@ -219,6 +310,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   }
 
   Future<void> _pickAndSendMedia({required bool isVideo, required bool isCamera}) async {
+    // ... 原有逻辑保持不变 ...
     final picker = ImagePicker();
     List<XFile> selectedFiles = [];
 
@@ -237,7 +329,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
 
     if (selectedFiles.isEmpty) return;
-
     final bool confirm = await _confirmSendMultiMedia(selectedFiles, isVideo: isVideo);
     if (!confirm) return;
 
@@ -249,13 +340,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       if (success) successCount++;
     }
 
-    if (mounted) {
-      if (successCount > 0) {
-        await _fetchMessages();
-        _scrollToBottom(animated: true);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('发送失败')));
-      }
+    if (mounted && successCount > 0) {
+      await _fetchMessages();
+      _scrollToBottom(animated: true);
     }
   }
 
@@ -358,7 +445,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     );
   }
 
-
   void _navigateToProfile(int userId, String nickname, String avatar) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => UserProfilePage(
       currentUserId: widget.currentUserId, targetUserId: userId, nickname: nickname, avatarUrl: avatar, introduction: "", myAvatarUrl: widget.currentUserAvatar,
@@ -367,15 +453,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
   void _viewMedia(String currentUrl) {
     final mediaMessages = _messages.where((m) {
-      final type = m['message_type'];
-      return (type == 'image' || type == 'video') && m['media_url'] != null;
-    }).toList().reversed.toList();
-    // 注意：_messages是[新->旧]，这里需要reversed变成[旧->新]给ViewMedia，这样左滑才是历史图片
+      return (m.type == 'image' || m.type == 'video') && m.mediaUrl != null;
+    }).toList().reversed.toList(); // 翻转回来按时间正序
 
     final List<MediaItem> galleryItems = mediaMessages.map((m) {
-      final isMe = m['sender_id'] == widget.currentUserId;
+      final isMe = m.senderId == widget.currentUserId;
       return MediaItem(
-        id: m['id'], mediaUrl: m['media_url'], mediaType: m['message_type'],
+        id: m.id, mediaUrl: m.mediaUrl!, mediaType: m.type,
         userNickname: isMe ? "我" : widget.otherUserNickname,
         userAvatarUrl: isMe ? widget.currentUserAvatar : widget.otherUserAvatar,
       );
@@ -414,20 +498,19 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       body: Column(
         children: [
           Expanded(
-            // 3. 【核心布局魔法】Align + ShrinkWrap + Reverse
             child: Align(
-              alignment: Alignment.topCenter, // 列表内容少时，强制靠上！
+              alignment: Alignment.topCenter,
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : ListView.builder(
-                reverse: true, // 倒序：保证键盘顶起无延迟，长对话自动到底
-                shrinkWrap: true, // 收缩：保证短对话能被 Align 拉到顶部
+                reverse: true,
+                shrinkWrap: true,
                 controller: _scrollController,
                 padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
                 itemCount: _messages.length,
                 itemBuilder: (context, index) {
                   final message = _messages[index];
-                  final isMe = message['sender_id'] == widget.currentUserId;
+                  final isMe = message.senderId == widget.currentUserId;
                   return _buildMessageItem(isMe, message);
                 },
               ),
@@ -472,29 +555,26 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     );
   }
 
-  Widget _buildMessageItem(bool isMe, dynamic message) {
-    final String type = message['message_type'] ?? 'text';
-
-    if (type == 'recalled') {
+  // 5. 【核心改造】消息气泡：增加状态图标支持
+  Widget _buildMessageItem(bool isMe, LocalMessage message) {
+    if (message.type == 'recalled') {
       return Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(isMe ? "你撤回了一条消息" : "\"${widget.otherUserNickname}\" 撤回了一条消息", style: const TextStyle(color: Colors.grey, fontSize: 12))));
     }
 
     final avatarUrl = isMe ? widget.currentUserAvatar : widget.otherUserAvatar;
     final userId = isMe ? widget.currentUserId : widget.otherUserId;
-    final String? mediaUrl = message['media_url'];
 
     Widget contentWidget;
 
-    if (type == 'image' && mediaUrl != null) {
+    if (message.type == 'image' && message.mediaUrl != null) {
       contentWidget = GestureDetector(
-        onTap: () => _viewMedia(mediaUrl),
-        // 固定宽高，防止抖动
-        child: Hero(tag: mediaUrl, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: SizedBox(width: 200, height: 250, child: Image.network(mediaUrl, fit: BoxFit.cover, loadingBuilder: (ctx, child, loading) => loading == null ? child : Container(color: Colors.grey[200], child: const Center(child: CircularProgressIndicator())))))),
+        onTap: () => _viewMedia(message.mediaUrl!),
+        child: Hero(tag: message.mediaUrl!, child: ClipRRect(borderRadius: BorderRadius.circular(8), child: SizedBox(width: 200, height: 250, child: Image.network(message.mediaUrl!, fit: BoxFit.cover, errorBuilder: (c,e,s)=>Container(color:Colors.grey))))),
       );
-    } else if (type == 'video' && mediaUrl != null) {
+    } else if (message.type == 'video' && message.mediaUrl != null) {
       contentWidget = GestureDetector(
-        onTap: () => _viewMedia(mediaUrl),
-        child: SizedBox(width: 200, height: 250, child: VideoMessageBubble(videoUrl: mediaUrl)),
+        onTap: () => _viewMedia(message.mediaUrl!),
+        child: SizedBox(width: 200, height: 250, child: VideoMessageBubble(videoUrl: message.mediaUrl!)),
       );
     } else {
       contentWidget = Container(
@@ -503,13 +583,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           color: isMe ? Colors.blue[100] : (Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Text(message['content'] ?? '', style: TextStyle(color: isMe ? Colors.black : Theme.of(context).colorScheme.onSurface, fontSize: 16)),
+        child: Text(message.content, style: TextStyle(color: isMe ? Colors.black : Theme.of(context).colorScheme.onSurface, fontSize: 16)),
       );
     }
 
     if (isMe) {
       contentWidget = GestureDetector(
-        onLongPress: () => _showMessageOptions(message['id']),
+        onLongPress: () => _showMessageOptions(message.id),
         child: contentWidget,
       );
     }
@@ -520,9 +600,28 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center, // 改为 Center，为了感叹号对齐
         children: [
           if (!isMe) ...[avatarWidget, const SizedBox(width: 10)],
+
+          // 👇👇👇 状态图标逻辑 👇👇👇
+          if (isMe && message.status == MessageSendStatus.failed)
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: GestureDetector(
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("消息发送失败，请检查网络或对方是否拒收")));
+                },
+                child: const Icon(Icons.error, color: Colors.red, size: 22),
+              ),
+            ),
+          if (isMe && message.status == MessageSendStatus.sending)
+            const Padding(
+              padding: EdgeInsets.only(right: 8.0),
+              child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+            ),
+          // 👆👆👆 逻辑结束 👆👆👆
+
           Flexible(child: contentWidget),
           if (isMe) ...[const SizedBox(width: 10), avatarWidget],
         ],

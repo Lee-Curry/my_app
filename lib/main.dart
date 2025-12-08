@@ -24,21 +24,27 @@ import 'avatar_viewer_page.dart'; // 👈 记得加这行
 // --- 【最终完整版】数据模型 (UserProfileData) ---
 class UserProfileData {
   final int id;
-  final String? username; // 1. 【新增】接收 username，设为可空
+  final String? username;
   final String nickname;
   final String introduction;
   final String? birthDate;
   final String avatarUrl;
   final bool hasPassword;
+  // 👇👇👇 新增这两个字段 👇👇👇
+  final String gender; // 1. 性别
+  final String region; // 2. 地区
 
   UserProfileData({
     required this.id,
-    this.username, // 2. 【新增】在构造函数里添加
+    this.username,
     required this.nickname,
     required this.introduction,
     this.birthDate,
     required this.avatarUrl,
     required this.hasPassword,
+    // 👇👇👇 构造函数也要加 👇👇👇
+    required this.gender,
+    required this.region,
   });
 }
 
@@ -677,6 +683,8 @@ class _ProfilePageState extends State<ProfilePage> {
             birthDate: data['birth_date'],
             avatarUrl: data['avatar_url'] ?? '',
             hasPassword: data['password_hash'] != null && data['password_hash'].isNotEmpty,
+            gender: data['gender'] ?? '保密',
+            region: data['region'] ?? '未知',
           );
         });
       } else {

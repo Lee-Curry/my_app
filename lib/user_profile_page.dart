@@ -1,6 +1,7 @@
 // === user_profile_page.dart (自动拉取最新资料版) ===
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:my_app/user_info_more_page.dart';
 import 'dart:convert';
 import 'private_chat_page.dart';
 import 'photo_gallery_page.dart';
@@ -299,7 +300,28 @@ class _UserProfilePageState extends State<UserProfilePage> {
                           }
                         }
                     ),
-                    _buildSettingsItem(context, "更多信息", showDivider: false, onTap: (){}),
+                    _buildSettingsItem(
+                    context,
+                    "更多信息",
+    showDivider: false,
+    onTap: () {
+    // 👇👇👇 修改这里 👇👇👇
+    Navigator.push(
+    context,
+    MaterialPageRoute(
+    builder: (context) => UserInfoMorePage(
+    currentUserId: widget.currentUserId,
+    targetUserId: widget.targetUserId,
+    // 注意：这里传最新的 _displayNickname 和 _displayIntroduction
+    // 这样在更多信息页看到的也是最新的数据
+    nickname: displayName,
+    introduction: _displayIntroduction,
+    avatarUrl: _displayAvatar,
+    ),
+    ),
+    );
+    },
+    ),
                   ],
                 ),
               ),

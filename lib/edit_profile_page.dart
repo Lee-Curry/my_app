@@ -1,4 +1,4 @@
-// === edit_profile_page.dart (最终版 - 完整代码) ===
+// === edit_profile_page.dart (完整修改版) ===
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -10,20 +10,18 @@ import 'package:mime/mime.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'main.dart'; // 引入以便未来使用
-
-// 在 edit_profile_page.dart 中
+import 'main.dart'; // 引入以便使用 UserProfileData
 
 class EditProfilePage extends StatefulWidget {
   final UserProfileData initialData;
   final int userId;
-  final bool hasPassword; // 1. 【新增】一个成员变量
+  final bool hasPassword;
 
   const EditProfilePage({
     super.key,
     required this.initialData,
     required this.userId,
-    required this.hasPassword, // 2. 【新增】在构造函数里接收它
+    required this.hasPassword,
   });
 
   @override
@@ -33,22 +31,32 @@ class EditProfilePage extends StatefulWidget {
 class _EditProfilePageState extends State<EditProfilePage> {
   late final TextEditingController _nicknameController;
   late final TextEditingController _introController;
+  late final TextEditingController _regionController; // 1. 【新增】地区控制器
+
   DateTime? _birthDate;
   File? _imageFile;
   bool _isSaving = false;
 
-  final String _apiUrl =
-      'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  // 2. 【新增】性别变量
+  String _selectedGender = "保密";
+  final List<String> _genderOptions = ["男", "女", "保密"];
+
+  // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = 'http://192.168.23.18:3000';
 
   @override
   void initState() {
     super.initState();
-    _nicknameController =
-        TextEditingController(text: widget.initialData.nickname);
-    _introController =
-        TextEditingController(text: widget.initialData.introduction);
-    if (widget.initialData.birthDate != null &&
-        widget.initialData.birthDate!.isNotEmpty) {
+    _nicknameController = TextEditingController(text: widget.initialData.nickname);
+    _introController = TextEditingController(text: widget.initialData.introduction);
+
+    // 初始化地区
+    _regionController = TextEditingController(text: widget.initialData.region);
+
+    // 初始化性别 (如果没有值，默认保密)
+    _selectedGender = widget.initialData.gender.isEmpty ? "保密" : widget.initialData.gender;
+
+    if (widget.initialData.birthDate != null && widget.initialData.birthDate!.isNotEmpty) {
       _birthDate = DateTime.tryParse(widget.initialData.birthDate!);
     }
   }
@@ -57,12 +65,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
   void dispose() {
     _nicknameController.dispose();
     _introController.dispose();
+    _regionController.dispose();
     super.dispose();
   }
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80); // 压缩图片质量
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
 
     if (pickedFile != null) {
       setState(() {
@@ -85,41 +94,39 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  // === 请用这个新函数，替换你文件中旧的 _saveProfile 函数 ===
-
   Future<void> _saveProfile() async {
-    // 在函数开始时就打印状态，用于调试
-    print("--- [前端探针] 点击保存按钮, _imageFile 是否为空: ${_imageFile == null}");
-
     if (_isSaving) return;
     setState(() { _isSaving = true; });
 
     final uri = Uri.parse('$_apiUrl/api/profile/${widget.userId}');
-    http.Response response; // 声明一个 response 变量来接收结果
+    http.Response response;
 
     try {
-      // 【核心改造】根据 _imageFile 是否为空，决定发送哪种请求
+      // 准备好所有文本字段
+      final Map<String, String> fields = {
+        'nickname': _nicknameController.text,
+        'introduction': _introController.text,
+        'gender': _selectedGender,          // 3. 【新增】发送性别
+        'region': _regionController.text,   // 4. 【新增】发送地区
+      };
+
+      if (_birthDate != null) {
+        fields['birthDate'] = DateFormat('yyyy-MM-dd').format(_birthDate!);
+      }
+
       if (_imageFile == null) {
-        // --- 情况1: 没有新图片，发送普通的 JSON 请求 ---
-        print("--- [前端探针] 正在发送 JSON PUT 请求...");
+        // --- 情况1: 普通 JSON 请求 ---
         final headers = {'Content-Type': 'application/json'};
-        final body = json.encode({
-          'nickname': _nicknameController.text,
-          'introduction': _introController.text,
-          if (_birthDate != null) 'birthDate': DateFormat('yyyy-MM-dd').format(_birthDate!),
-        });
-        // 直接使用 http.put 发送请求
+        // 合并字段到 JSON body
+        final body = json.encode(fields);
         response = await http.put(uri, headers: headers, body: body).timeout(const Duration(seconds: 30));
 
       } else {
-        // --- 情况2: 选择了新图片，使用你原来的 Multipart 请求逻辑 ---
-        print("--- [前端探针] 正在发送 Multipart PUT 请求...");
+        // --- 情况2: Multipart 请求 (带图片) ---
         var request = http.MultipartRequest('PUT', uri);
-        request.fields['nickname'] = _nicknameController.text;
-        request.fields['introduction'] = _introController.text;
-        if (_birthDate != null) {
-          request.fields['birthDate'] = DateFormat('yyyy-MM-dd').format(_birthDate!);
-        }
+
+        // 批量添加文本字段
+        request.fields.addAll(fields);
 
         final mimeType = lookupMimeType(_imageFile!.path);
         request.files.add(
@@ -129,13 +136,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
             contentType: MediaType.parse(mimeType ?? 'application/octet-stream'),
           ),
         );
-        // 发送 Multipart 请求
-        final streamedResponse = await request.send().timeout(const Duration(seconds: 90)); // 延长上传超时时间
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 90));
         response = await http.Response.fromStream(streamedResponse);
       }
 
       if (mounted && response.statusCode == 200) {
         final updatedData = json.decode(response.body)['data'];
+
+        // 返回新的 UserProfileData 对象给上一页
         Navigator.pop(
           context,
           UserProfileData(
@@ -144,24 +152,22 @@ class _EditProfilePageState extends State<EditProfilePage> {
             introduction: updatedData['introduction'] ?? '',
             birthDate: updatedData['birth_date'],
             avatarUrl: updatedData['avatar_url'] ?? '',
-            // 3. 【新增】把接收到的 hasPassword 状态原样返回
             hasPassword: widget.hasPassword,
+            gender: updatedData['gender'] ?? _selectedGender, // 5. 【新增】更新返回
+            region: updatedData['region'] ?? _regionController.text, // 6. 【新增】更新返回
+            username: widget.initialData.username, // 保持原样
           ),
         );
       } else if (mounted) {
-        print("--- [前端探针][错误] 保存失败，状态码: ${response.statusCode}, 响应体: ${response.body}");
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败: ${response.body}')));
       }
 
     } catch (e) {
-      print("--- [前端探针][错误] 发生网络异常: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('网络错误: $e')));
       }
     } finally {
-      if (mounted) {
-        setState(() { _isSaving = false; });
-      }
+      if (mounted) setState(() { _isSaving = false; });
     }
   }
 
@@ -181,6 +187,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         padding: const EdgeInsets.all(24.0),
         children: [
           const SizedBox(height: 20),
+          // 头像
           Center(
             child: Stack(
               children: [
@@ -197,8 +204,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     radius: 20,
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     child: IconButton(
-                      icon: Icon(Icons.edit,
-                          color: Theme.of(context).colorScheme.onPrimary),
+                      icon: Icon(Icons.edit, color: Theme.of(context).colorScheme.onPrimary),
                       onPressed: _pickImage,
                     ),
                   ),
@@ -207,16 +213,52 @@ class _EditProfilePageState extends State<EditProfilePage> {
             ),
           ),
           const SizedBox(height: 40),
+
+          // 昵称
           TextField(
             controller: _nicknameController,
             decoration: InputDecoration(
               labelText: '昵称',
               prefixIcon: const Icon(Icons.person_outline),
-              border:
-              OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
           const SizedBox(height: 20),
+
+          // 7. 【新增】性别选择器
+          DropdownButtonFormField<String>(
+            value: _selectedGender,
+            decoration: InputDecoration(
+              labelText: '性别',
+              prefixIcon: const Icon(Icons.wc),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            items: _genderOptions.map((String value) {
+              return DropdownMenuItem<String>(
+                value: value,
+                child: Text(value),
+              );
+            }).toList(),
+            onChanged: (newValue) {
+              setState(() {
+                _selectedGender = newValue!;
+              });
+            },
+          ),
+          const SizedBox(height: 20),
+
+          // 8. 【新增】地区输入框
+          TextField(
+            controller: _regionController,
+            decoration: InputDecoration(
+              labelText: '地区',
+              prefixIcon: const Icon(Icons.location_on_outlined),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // 生日
           ListTile(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -231,14 +273,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
             onTap: () => _selectDate(context),
           ),
           const SizedBox(height: 20),
+
+          // 简介
           TextField(
             controller: _introController,
             maxLines: 3,
             decoration: InputDecoration(
               labelText: '个人介绍',
               alignLabelWithHint: true,
-              border:
-              OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
         ],

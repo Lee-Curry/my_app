@@ -30,7 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  intl: ^0.18.1
+  intl: ^0.19.0
   http: ^1.1.0
   image_picker: ^1.0.4
   mime: ^1.0.4
@@ -39,6 +39,8 @@ dependencies:
   chewie: ^1.7.4
   photo_view: ^0.14.0
   flutter_staggered_grid_view: ^0.7.0 # 瀑布流神器
+  fl_chart: ^0.66.0      # 强大的图表库
+  table_calendar: ^3.1.0 # 专业的日历组件
 
 
 
@@ -70,6 +72,8 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/icon/icon.png
 # 添加下面整个配置块
 flutter_launcher_icons:
   android: "launcher_icon"
