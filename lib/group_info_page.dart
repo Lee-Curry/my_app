@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'user_profile_page.dart';
 import 'group_add_member_page.dart';
 import 'group_remove_member_page.dart'; // 👈 导入踢人页面
+import 'config.dart';
 
 class GroupInfoPage extends StatefulWidget {
   final int currentUserId;
@@ -27,7 +28,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
   bool _isLoading = true;
   bool _isOwner = false; // 是否是群主
 
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

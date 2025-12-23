@@ -11,6 +11,7 @@ import 'web_socket_service.dart';
 import 'notification_page.dart';
 import 'create_post_page.dart'; // 导入发布页
 import 'post_detail_page.dart'; // 导入详情页
+import 'config.dart';
 
 // ==========================================
 // 1. 保留这些类，防止 private_chat_page 报错
@@ -152,7 +153,7 @@ class _PhotoGalleryPageState extends State<PhotoGalleryPage> {
   List<dynamic> _posts = []; // 这里改存帖子数据
   bool _isLoading = true;
   int _unreadCount = 0;
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

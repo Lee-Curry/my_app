@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'main.dart'; // 假设你的首页在 main.dart，用于删除好友后跳转
+// 确保 main.dart 里有路由定义，或者根据你的实际路由跳转逻辑修改
+import 'config.dart';
+import 'main.dart';
 
 class UserInfoMorePage extends StatefulWidget {
   final int currentUserId;
@@ -27,43 +29,59 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
   bool _isBlacklisted = false;
   bool _isLoading = false;
 
-  // 1. 【新增】用于存储详细信息的变量
+  // 1. 用于存储详细信息的变量
   String _gender = "加载中...";
   String _region = "加载中...";
-  String _fullIntroduction = ""; // 用于存储最新拉取的完整简介
+  String _fullIntroduction = "";
 
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {
     super.initState();
     _fullIntroduction = widget.introduction;
     _fetchTargetUserInfo(); // 拉取详细资料
-    _checkBlacklistStatus(); // 1. 【新增】进来就查黑名单状态
+    _checkBlacklistStatus(); // 检查黑名单状态
   }
 
-  // 3. 【核心】获取目标用户的详细信息 (包含性别、地区)
+  // --- 3. 【核心修复】获取目标用户的详细信息 ---
   Future<void> _fetchTargetUserInfo() async {
+    print("--- [前端探针] 正在获取用户 ${widget.targetUserId} 的详情...");
     try {
       final response = await http.get(Uri.parse('$_apiUrl/api/profile/${widget.targetUserId}'));
+
+      // 打印后端返回的数据，方便调试
+      print("--- [前端探针] API返回: ${response.body}");
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body)['data'];
+
         if (mounted) {
           setState(() {
-            // 解析后端返回的字段，注意字段名要和数据库/后端一致
+            // 1. 处理地区 (region)
+            // 逻辑：如果不是null，且不是空字符串，就显示；否则显示"未知"
+            if (data['region'] != null && data['region'].toString().trim().isNotEmpty) {
+              _region = data['region'].toString();
+            } else {
+              _region = "未知";
+            }
+
+            // 2. 处理性别 (gender)
             _gender = data['gender'] ?? '保密';
-            _region = data['region'] ?? '未知';
+
+            // 3. 处理简介
             _fullIntroduction = data['introduction'] ?? '暂无签名';
           });
         }
       }
     } catch (e) {
-      if(mounted) setState(() { _gender = "未知"; _region = "未知"; });
+      print("--- [前端探针][错误] 获取详情失败: $e");
+      if(mounted) setState(() { _gender = "未知"; _region = "获取失败"; });
     }
   }
 
-  // --- 【新增】查询初始黑名单状态 ---
+  // --- 查询初始黑名单状态 ---
   Future<void> _checkBlacklistStatus() async {
     try {
       final uri = Uri.parse('$_apiUrl/api/blacklist/check?userId=${widget.currentUserId}&targetId=${widget.targetUserId}');
@@ -82,9 +100,9 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
     }
   }
 
-  // --- 【完善】功能 1: 加入/移出黑名单 ---
+  // --- 【修复版】功能 1: 加入/移出黑名单 ---
   Future<void> _toggleBlacklist(bool value) async {
-    // 1. 乐观更新 UI (让开关立马变，体验好)
+    // 1. 乐观更新 UI
     setState(() => _isBlacklisted = value);
 
     try {
@@ -95,19 +113,19 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
         body: jsonEncode({
           'userId': widget.currentUserId,
           'targetId': widget.targetUserId,
-          'action': value ? 'block' : 'unblock', // value为true代表要拉黑
+          'action': value ? 'block' : 'unblock',
         }),
       );
 
       // 3. 检查结果
       if (response.statusCode != 200) {
-        // 如果失败了，把开关拨回去
+        // 失败回滚
         if (mounted) {
           setState(() => _isBlacklisted = !value);
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("操作失败，请检查网络")));
         }
       } else {
-        // 成功提示
+        // 成功提示 (移到了这里，只有成功才弹)
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(value ? "已加入黑名单，将不再接收对方消息" : "已移出黑名单")),
@@ -115,22 +133,16 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
         }
       }
     } catch (e) {
-      // 网络异常，回滚状态
+      // 网络异常回滚
       if (mounted) {
         setState(() => _isBlacklisted = !value);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("网络错误")));
       }
     }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(value ? "已加入黑名单" : "已移出黑名单")),
-    );
   }
 
-  // --- 功能 2: 删除好友 ---
-  // --- 功能 2: 删除好友 (修正版) ---
+  // --- 功能 2: 删除好友 (保留之前的逻辑) ---
   Future<void> _deleteFriend() async {
-    // 1. 弹窗确认
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -151,34 +163,25 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
       },
     );
 
-    // 如果用户点了取消，直接返回
     if (confirmed != true) return;
 
     setState(() => _isLoading = true);
 
     try {
-      // 2. 调用后端 API
-      // 注意：这里必须使用 delete 方法，且 header 要设置 JSON
       final response = await http.delete(
         Uri.parse('$_apiUrl/api/friends/delete'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          // ！！！关键点：这里必须和你的 Node.js 后端 req.body 里的 key 完全一致 ！！！
           'myUserId': widget.currentUserId,
           'friendUserId': widget.targetUserId,
         }),
       );
 
-      // 解析返回结果
       final resBody = jsonDecode(response.body);
 
-      // 你的后端成功返回的是 { code: 200, msg: '已删除好友' }
       if (response.statusCode == 200 && resBody['code'] == 200) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已删除好友")));
-
-        // 3. 删除成功后，跳转回首页
-        // (route) => false 表示清空之前的所有路由，防止点返回键又回到这个人的页面
         Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
       } else {
         throw Exception(resBody['msg'] ?? "删除失败");
@@ -194,7 +197,6 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
 
   @override
   Widget build(BuildContext context) {
-    // 适配深色模式颜色
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -213,25 +215,24 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
             color: cardColor,
             child: Column(
               children: [
-                // 1. 完整的个人简介
                 ListTile(
                   title: Text("个性签名", style: TextStyle(fontSize: 15, color: textColor)),
                   subtitle: Text(
-                      widget.introduction.isEmpty ? "暂无签名" : widget.introduction,
+                      _fullIntroduction.isEmpty ? "暂无签名" : _fullIntroduction,
                       style: TextStyle(fontSize: 13, color: subTextColor)
                   ),
                 ),
                 _buildDivider(context),
 
-                // 2. 性别 (示例数据)
+                // 性别
                 _buildInfoRow(context, "性别", _gender),
                 _buildDivider(context),
 
-                // 3. 地区 (示例数据)
+                // 地区 (这里会显示 _region 变量的值)
                 _buildInfoRow(context, "地区", _region),
                 _buildDivider(context),
 
-                // 4. 用户ID (方便查找)
+                // ID
                 ListTile(
                   title: Text("晗伴号", style: TextStyle(fontSize: 15, color: textColor)),
                   trailing: Text("${widget.targetUserId}", style: TextStyle(color: subTextColor, fontSize: 14)),
@@ -268,15 +269,16 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
           const SizedBox(height: 40),
 
           // --- 第三组：危险操作 ---
-          Container(
-            color: cardColor,
-            child: ListTile(
-              title: const Center(
-                child: Text("删除好友", style: TextStyle(color: Colors.red, fontSize: 16, fontWeight: FontWeight.bold)),
+          if (widget.currentUserId != widget.targetUserId) // 防止自己删自己
+            Container(
+              color: cardColor,
+              child: ListTile(
+                title: const Center(
+                  child: Text("删除好友", style: TextStyle(color: Colors.red, fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+                onTap: _deleteFriend,
               ),
-              onTap: _deleteFriend,
             ),
-          ),
 
           const SizedBox(height: 50),
         ],
@@ -284,7 +286,6 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
     );
   }
 
-  // 辅助方法：构建纯展示的行
   Widget _buildInfoRow(BuildContext context, String label, String value) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListTile(
@@ -293,7 +294,6 @@ class _UserInfoMorePageState extends State<UserInfoMorePage> {
     );
   }
 
-  // 辅助方法：构建分割线
   Widget _buildDivider(BuildContext context) {
     return Divider(height: 1, indent: 16, color: Theme.of(context).dividerColor.withOpacity(0.1));
   }

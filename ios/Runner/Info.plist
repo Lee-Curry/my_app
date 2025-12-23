@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
+    <!-- 👇👇👇 必须确保这三项都有，否则 iOS 100% 闪退 👇👇👇 -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>我们需要您的位置来显示地图定位</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>我们需要您的位置来显示地图定位</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>我们需要您的位置来显示地图定位</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>我们需要访问您的相册来选择头像</string>
     <key>NSCameraUsageDescription</key>
@@ -26,6 +34,10 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>我们需要您的位置以显示您的所在地区</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>我们需要您的位置以显示您的所在地区</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
@@ -51,5 +63,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+    <!-- 👇👇👇 新增这段配置，允许访问 HTTP 接口 👇👇👇 -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+    <!-- 👆👆👆 新增结束 👆👆👆 -->
+
 </dict>
 </plist>

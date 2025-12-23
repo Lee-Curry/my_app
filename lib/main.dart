@@ -17,6 +17,7 @@ import 'conversations_list_page.dart'; // 1. 【新增】导入新页面
 import 'web_socket_service.dart';
 import 'contacts_page.dart'; // 👈 新增导入
 import 'avatar_viewer_page.dart'; // 👈 记得加这行
+import 'config.dart';
 
 // --- 新的数据模型 (UserProfileData) ---
 // 在 main.dart 的顶部
@@ -310,7 +311,7 @@ class _HomePageState extends State<HomePage> {
   // 👇 1. 新增变量：默认显示加载中，或者一句通用的兜底文案
   String _dailyQuote = "正在获取今日份的治愈...";
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {
@@ -659,7 +660,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   UserProfileData? _profileData;
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

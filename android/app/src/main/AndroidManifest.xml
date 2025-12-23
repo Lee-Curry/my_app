@@ -17,6 +17,8 @@
 
     <!-- 相机权限 (拍照用) -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- 👆👆👆 复制结束 👆👆👆 -->
 
     <application
@@ -24,6 +26,7 @@
         android:label="晗伴"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -13,6 +13,7 @@ import 'user_profile_page.dart';
 import 'photo_gallery_page.dart';
 import 'media_viewer_page.dart';
 import 'web_socket_service.dart';
+import 'config.dart';
 
 // 1. 【新增】定义消息发送状态
 enum MessageSendStatus { sending, success, failed }
@@ -94,7 +95,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   Timer? _timer;
   int? _conversationId;
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

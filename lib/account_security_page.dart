@@ -3,7 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'bind_phone_page.dart'; // 1. 【新增】导入新页面
+import 'bind_phone_page.dart';
+import 'package:my_app/config.dart';
+import 'config.dart'; // 1. 【新增】导入新页面
 
 class AccountSecurityPage extends StatefulWidget {
   final int userId;
@@ -19,7 +21,7 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
   String? _registrationDate;
   String _errorMessage = '';
 
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = AppConfig.baseUrl; // ！！！！请务必替换为您自己的IP地址！！！！
 
   @override
   void initState() {

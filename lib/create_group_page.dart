@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import 'config.dart';
+
 class CreateGroupPage extends StatefulWidget {
   final int currentUserId;
   const CreateGroupPage({super.key, required this.currentUserId});
@@ -14,7 +16,7 @@ class CreateGroupPage extends StatefulWidget {
 class _CreateGroupPageState extends State<CreateGroupPage> {
   List<dynamic> _contacts = [];
   Set<int> _selectedIds = {}; // 选中的人
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

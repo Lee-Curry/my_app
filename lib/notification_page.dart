@@ -5,6 +5,7 @@ import 'package:my_app/post_detail_page.dart';
 import 'dart:convert';
 import 'photo_gallery_page.dart';
 import 'media_viewer_page.dart';
+import 'config.dart';
 
 class NotificationPage extends StatefulWidget {
   final int userId;
@@ -17,7 +18,7 @@ class NotificationPage extends StatefulWidget {
 class _NotificationPageState extends State<NotificationPage> {
   List<dynamic> _notifications = [];
   bool _isLoading = true;
-  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换IP
+  final String _apiUrl = AppConfig.baseUrl; // 替换IP
 
   @override
   void initState() {

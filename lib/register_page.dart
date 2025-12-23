@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'auth_service.dart'; // 引入AuthService来保存登录信息
+import 'config.dart';
 
 class RegisterPage extends StatefulWidget {
   final VoidCallback onRegisterSuccess;
@@ -20,7 +21,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>(); // 用于表单验证
   bool _isRegistering = false;
 
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = AppConfig.baseUrl; // ！！！！请务必替换为您自己的IP地址！！！！
 
   Future<void> _register() async {
     // 1. 验证表单输入

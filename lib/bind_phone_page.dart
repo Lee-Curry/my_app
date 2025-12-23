@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'config.dart';
 
 class BindPhonePage extends StatefulWidget {
   final int userId;
@@ -18,7 +19,7 @@ class _BindPhonePageState extends State<BindPhonePage> {
   bool _isSendingCode = false;
   bool _isBinding = false;
 
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = AppConfig.baseUrl; // ！！！！请务必替换为您自己的IP地址！！！！
 
   // 发送验证码 (复用 login_page.dart 的逻辑)
   Future<void> _sendCode() async {

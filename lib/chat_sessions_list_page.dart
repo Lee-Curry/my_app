@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'ai_chat_page.dart'; // 导入聊天页
+import 'config.dart';
 
 class ChatSessionsListPage extends StatefulWidget {
   final int userId;
@@ -18,7 +19,7 @@ class _ChatSessionsListPageState extends State<ChatSessionsListPage> {
   bool _isLoading = true;
 
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

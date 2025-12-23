@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:mime/mime.dart';
 import 'package:video_player/video_player.dart'; // 👈 必须导入
+import 'config.dart';
 
 class CreatePostPage extends StatefulWidget {
   final int userId;
@@ -25,7 +26,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   bool _isPublishing = false;
 
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   Future<void> _pickMedia({required bool isVideo, required bool isCamera}) async {
     int maxCount = 9 - _selectedFiles.length;

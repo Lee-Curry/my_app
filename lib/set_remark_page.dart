@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'config.dart';
 
 class SetRemarkPage extends StatefulWidget {
   final int myUserId;
@@ -23,7 +24,7 @@ class SetRemarkPage extends StatefulWidget {
 
 class _SetRemarkPageState extends State<SetRemarkPage> {
   final TextEditingController _controller = TextEditingController();
-  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换IP
+  final String _apiUrl = AppConfig.baseUrl; // 替换IP
 
   @override
   void initState() {

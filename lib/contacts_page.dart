@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'user_profile_page.dart';
+import 'config.dart';
 
 class ContactsPage extends StatefulWidget {
   final int currentUserId;
@@ -22,7 +23,7 @@ class _ContactsPageState extends State<ContactsPage> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
 
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

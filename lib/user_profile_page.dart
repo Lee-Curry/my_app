@@ -7,6 +7,7 @@ import 'private_chat_page.dart';
 import 'photo_gallery_page.dart';
 import 'set_remark_page.dart';
 import 'avatar_viewer_page.dart';
+import 'config.dart';
 
 class UserProfilePage extends StatefulWidget {
   final int currentUserId;
@@ -42,7 +43,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
   late String _displayNickname;
 
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

@@ -15,6 +15,7 @@ import 'photo_gallery_page.dart';
 import 'media_viewer_page.dart';
 import 'web_socket_service.dart';
 import 'group_info_page.dart';
+import 'config.dart';
 
 class GroupChatPage extends StatefulWidget {
   final int currentUserId;
@@ -46,7 +47,7 @@ class _GroupChatPageState extends State<GroupChatPage> with WidgetsBindingObserv
 
   Timer? _timer;
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   get _conversationId => null;
 

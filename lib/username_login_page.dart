@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'auth_service.dart';
+import 'config.dart';
 
 class UsernameLoginPage extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -19,7 +20,7 @@ class _UsernameLoginPageState extends State<UsernameLoginPage> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoggingIn = false;
 
-  final String _apiUrl = 'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+  final String _apiUrl = AppConfig.baseUrl; // ！！！！请务必替换为您自己的IP地址！！！！
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) {

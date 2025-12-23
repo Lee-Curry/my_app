@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'mood_model.dart';
+import 'config.dart';
 
 class MoodService {
   // ！！！！请确保这里的 IP 和你 index.js 运行的电脑 IP 一致！！！！
-  final String baseUrl = 'http://192.168.23.18:3000';
+  final String baseUrl = AppConfig.baseUrl;
 
   // 1. 提交心情
   Future<String> submitMood({

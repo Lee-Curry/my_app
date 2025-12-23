@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'auth_service.dart';
 import 'register_page.dart';         // 1. 导入新页面
 import 'username_login_page.dart'; // 2. 导入新页面
+import 'config.dart';
 
 // --- 欢迎页 (总入口) ---
 class WelcomePage extends StatelessWidget {
@@ -113,7 +114,7 @@ class _PhoneLoginPageState extends State<PhoneLoginPage> {
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
   final String _apiUrl =
-      'http://192.168.23.18:3000'; // ！！！！请务必替换为您自己的IP地址！！！！
+      AppConfig.baseUrl; // ！！！！请务必替换为您自己的IP地址！！！！
   bool _isSendingCode = false;
   bool _isLoggingIn = false;
 

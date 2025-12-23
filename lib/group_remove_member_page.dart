@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'config.dart';
 
 class GroupRemoveMemberPage extends StatefulWidget {
   final int currentUserId; // 群主ID (我)
@@ -20,7 +21,7 @@ class GroupRemoveMemberPage extends StatefulWidget {
 
 class _GroupRemoveMemberPageState extends State<GroupRemoveMemberPage> {
   Set<int> _selectedIds = {};
-  final String _apiUrl = 'http://192.168.23.18:3000'; // 替换IP
+  final String _apiUrl = AppConfig.baseUrl; // 替换IP
 
   Future<void> _submitRemove() async {
     if (_selectedIds.isEmpty) return;

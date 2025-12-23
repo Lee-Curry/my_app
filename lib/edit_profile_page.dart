@@ -9,8 +9,11 @@ import 'package:intl/intl.dart';
 import 'package:mime/mime.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'location_picker_page.dart';
+import 'location_utils.dart';
+import 'config.dart';
 import 'main.dart'; // 引入以便使用 UserProfileData
+
 
 class EditProfilePage extends StatefulWidget {
   final UserProfileData initialData;
@@ -42,7 +45,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final List<String> _genderOptions = ["男", "女", "保密"];
 
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {
@@ -248,11 +251,38 @@ class _EditProfilePageState extends State<EditProfilePage> {
           const SizedBox(height: 20),
 
           // 8. 【新增】地区输入框
+          // 8. 【修改】地区输入框 (带定位功能)
           TextField(
             controller: _regionController,
             decoration: InputDecoration(
               labelText: '地区',
               prefixIcon: const Icon(Icons.location_on_outlined),
+              // 👇👇👇 新增后缀图标：定位按钮 👇👇👇
+              // 8. 【修改】地区输入框 (带地图选点)
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.map_outlined, color: Colors.blue), // 换成地图图标
+                tooltip: "在地图上选择",
+                onPressed: () async {
+                  // 收起键盘
+                  FocusScope.of(context).unfocus();
+
+                  // 跳转到地图页，并等待返回结果
+                  final String? selectedAddress = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const LocationPickerPage(),
+                    ),
+                  );
+
+                  // 如果用户选了地址并点击了确定
+                  if (selectedAddress != null && selectedAddress.isNotEmpty) {
+                    setState(() {
+                      _regionController.text = selectedAddress;
+                    });
+                  }
+                },
+              ),
+              // 👆👆👆 新增结束 👆👆👆
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),

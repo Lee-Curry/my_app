@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'private_chat_page.dart';
+import 'config.dart';
 
 class UsersListPage extends StatefulWidget {
   final int currentUserId;
@@ -18,7 +19,7 @@ class _UsersListPageState extends State<UsersListPage> {
   bool _isLoading = true;
   String _myAvatarUrl = '';
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {

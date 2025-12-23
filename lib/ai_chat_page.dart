@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
+import 'config.dart';
+
 // 消息模型
 class ChatMessage {
   final String role; // 'user' 或 'assistant'
@@ -37,7 +39,7 @@ class _AiChatPageState extends State<AiChatPage> {
   bool _isHistoryLoading = true;
 
   // ！！！！请务必替换为您自己的IP地址！！！！
-  final String _apiUrl = 'http://192.168.23.18:3000';
+  final String _apiUrl = AppConfig.baseUrl;
 
   @override
   void initState() {
