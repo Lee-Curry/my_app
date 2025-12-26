@@ -202,7 +202,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     _textController.clear();
     setState(() { _showSendButton = false; });
 
-    // 1. 创建本地临时消息
+    // 1. 创建本地临时消息 (用于显示转圈)
     final tempId = DateTime.now().millisecondsSinceEpoch;
     final tempMessage = LocalMessage(
       id: tempId,
@@ -234,35 +234,56 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       final resBody = jsonDecode(response.body);
 
       if (mounted) {
-        // 🌟 核心修改开始：不再进行 remove 和 fetch 操作 🌟
+        // 判断是否需要“原子替换” (成功 201 或 被拒 403 且已存库)
+        bool needAtomicSwap = false;
 
-        setState(() {
-          // 找到刚才那条临时消息
-          final index = _messages.indexWhere((m) => m.id == tempId);
-          if (index != -1) {
-            if (response.statusCode == 201 || (resBody['success'] == true)) {
-              // 情况 A: 发送成功 -> 变正常
-              _messages[index].status = MessageSendStatus.success;
-            }
-            else if (response.statusCode == 403 || resBody['saved'] == true) {
-              // 情况 B: 被拉黑 -> 变红点 (重点在这里)
-              // 我们直接修改本地这条消息的状态为 failed
-              // 绝对不要 remove 它，也绝对不要在这里 await _fetchMessages()
-              // 这样就不会闪烁了
-              _messages[index].status = MessageSendStatus.failed;
+        if (response.statusCode == 201 || (resBody['success'] == true)) {
+          // === 情况 A: 发送成功 ===
+          needAtomicSwap = true;
+        } else if (response.statusCode == 403 || resBody['saved'] == true) {
+          // === 情况 B: 被拉黑但已存档 ===
+          needAtomicSwap = true;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("消息已发出，但被对方拒收了"),
+            duration: Duration(milliseconds: 1500),
+          ));
+        }
 
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text("消息已发出，但被对方拒收了"),
-                duration: Duration(seconds: 1),
-              ));
-            }
-            else {
-              // 情况 C: 其他错误 -> 变红点
-              _messages[index].status = MessageSendStatus.failed;
-            }
+        // === 统一处理逻辑 ===
+        if (needAtomicSwap) {
+          // 1. 此时界面显示“发送中”，保持不动，防止闪烁
+          // 2. 悄悄去后台拉取最新的服务器数据
+          final fetchResponse = await http.get(
+              Uri.parse('$_apiUrl/api/messages/$_conversationId?userId=${widget.currentUserId}')
+          );
+
+          if (mounted && fetchResponse.statusCode == 200) {
+            final List data = json.decode(fetchResponse.body)['data'];
+            final List<LocalMessage> serverMessages = data.map((e) => LocalMessage.fromJson(e)).toList().reversed.toList();
+
+            // 3. 数据回来后，瞬间完成“偷天换日”
+            // 删掉本地临时ID -> 换上服务器真实ID
+            setState(() {
+              // 移除刚才那个临时消息
+              _messages.removeWhere((m) => m.id == tempId);
+
+              // 为了保险，过滤掉所有状态为 success 的临时消息 (防止极端情况下的重复)
+              final pendingMsgs = _messages.where((m) {
+                return m.id > 10000000000 && m.status != MessageSendStatus.success;
+              }).toList();
+
+              // 合并：本地剩余的(失败/发送中) + 服务器最新的
+              _messages = [...pendingMsgs, ...serverMessages];
+            });
           }
-        });
-        // 🌟 核心修改结束 🌟
+        } else {
+          // === 情况 C: 真正的网络错误 (没存库) ===
+          // 只有这种情况保留本地消息，并变红
+          setState(() {
+            final index = _messages.indexWhere((m) => m.id == tempId);
+            if (index != -1) _messages[index].status = MessageSendStatus.failed;
+          });
+        }
       }
 
     } catch (e) {
