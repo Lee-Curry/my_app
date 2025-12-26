@@ -10,6 +10,8 @@
     <string>我们需要您的位置来显示地图定位</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>我们需要您的位置来显示地图定位</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>我们需要验证您的身份以保护您的隐私日记</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>我们需要访问您的相册来选择头像</string>
     <key>NSCameraUsageDescription</key>

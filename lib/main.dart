@@ -2,7 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'app_lock_wrapper.dart';
+import 'biometric_service.dart';
 import 'login_page.dart';
 import 'edit_profile_page.dart' as edit_page; // 1. 使用别名导入，避免类名冲突
 import 'auth_service.dart';
@@ -49,7 +52,12 @@ class UserProfileData {
   });
 }
 
-void main() {
+void main() async {
+  // 1. 确保初始化
+  WidgetsFlutterBinding.ensureInitialized();
+  // 2. 初始化生物识别配置
+  await BiometricService.init();
+
   runApp(const MyApp());
 }
 
@@ -118,24 +126,34 @@ class _MyAppState extends State<MyApp> {
       ),
       themeMode: _themeMode,
       debugShowCheckedModeBanner: false,
+      // 👇👇👇 核心修改：使用 builder 包裹全局 👇👇👇
+      // 这里的 child 就是整个 App 的 Navigator (包含所有页面)
+      builder: (context, child) {
+        return AppLockWrapper(
+          child: child!, // 把整个导航器传给 Wrapper
+        );
+      },
+      // 👆👆👆 修改结束 👆👆👆
       home: FutureBuilder<Map<String, dynamic>?>(
         future: _checkLoginFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(body: Center(child: CircularProgressIndicator()));
-          }
           if (snapshot.hasData && snapshot.data != null) {
-            final loginInfo = snapshot.data!;
+            // 这里直接返回 MainScreen，不需要再包 Wrapper 了，因为外面包过了
             return MainScreen(
               onThemeModeChanged: _toggleTheme,
               onLogout: _handleLogout,
-              userId: loginInfo['userId'],
+              userId: snapshot.data!['userId'],
             );
           }
           return WelcomePage(onLoginSuccess: _onLoginSuccess);
         },
       ),
     );
+  }
+
+  Future<bool> _getAppLockState() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('app_lock_enabled') ?? false; // 默认 false
   }
 }
 

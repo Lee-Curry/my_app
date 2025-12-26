@@ -97,22 +97,31 @@ class _UserProfilePageState extends State<UserProfilePage> {
     } catch (e) {}
   }
 
+  // 3. 【核心修复】获取预览照片 (改为从帖子列表获取封面)
   Future<void> _fetchPreviewPhotos() async {
     try {
-      final res = await http.get(Uri.parse('$_apiUrl/api/photos/user/${widget.targetUserId}?currentUserId=${widget.currentUserId}'));
+      // 👇👇👇 修改 1: 接口换成获取帖子列表的接口 👇👇👇
+      final uri = Uri.parse('$_apiUrl/api/posts/list?userId=${widget.targetUserId}&viewerId=${widget.currentUserId}');
+      final res = await http.get(uri);
+
       if (res.statusCode == 200) {
         final List data = jsonDecode(res.body)['data'];
+
         if (mounted) {
           setState(() {
+            // 👇👇👇 修改 2: 解析逻辑改变 👇👇👇
+            // 我们取前 4 个帖子的 cover_url (封面图) 作为预览
             _previewPhotos = data
-                .where((item) => item['media_type'] == 'image' || item['media_type'] == null)
+                .where((item) => item['cover_url'] != null && item['cover_url'].toString().isNotEmpty)
                 .take(4)
-                .map<String>((item) => item['url'] ?? item['media_url'])
+                .map<String>((item) => item['cover_url'].toString())
                 .toList();
           });
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      print("获取照片墙预览失败: $e");
+    }
   }
 
   Future<void> _sendFriendRequest() async {

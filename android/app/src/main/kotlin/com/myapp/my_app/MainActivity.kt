@@ -1,5 +1,8 @@
 package com.myapp.my_app
 
-import io.flutter.embedding.android.FlutterActivity
+// 👇 1. 引入这个包
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+// 👇 2. 将 FlutterActivity 改为 FlutterFragmentActivity
+class MainActivity: FlutterFragmentActivity() {
+}
