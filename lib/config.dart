@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 
 class AppConfig {
   // 你的局域网 IP (真机调试必须用这个)
-  static const String _lanIp = "192.168.156.18";
+  static const String _lanIp = "10.162.14.18";
 
   static String get baseUrl {
     // 1. 如果是 iOS 模拟器，可以使用 localhost
